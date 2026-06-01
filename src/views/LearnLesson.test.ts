@@ -30,8 +30,10 @@ vi.mock('@/learn/useLearnerSession', () => ({
 }))
 
 let routeSlug = 't9wy9t2t6d'
+const routerReplace = vi.fn()
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { slug: routeSlug } }),
+  useRoute: () => ({ params: { slug: routeSlug }, query: {} }),
+  useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
 }))
 
 import LearnLesson from './LearnLesson.vue'

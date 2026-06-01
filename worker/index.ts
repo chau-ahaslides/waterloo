@@ -35,6 +35,21 @@ import {
   resolvePresenterToken,
   runWorkersAi,
 } from './lessons-convert'
+import {
+  addCourseLesson,
+  createCourse,
+  deleteCourse,
+  getCourse,
+  getCourseBySlug,
+  listCourses,
+  patchCourse,
+  publishCourse,
+  removeCourseLesson,
+  reorderCourse,
+  saveCourseProgress,
+  startCourseLearner,
+  unpublishCourse,
+} from './courses'
 
 /** One per-slide snapshot inside an attempt's `responses` array. */
 interface AttemptResponse {
@@ -398,14 +413,6 @@ async function convertLesson(env: Env, request: Request): Promise<Response> {
 // wires them; they continue to return 501.
 //
 // NOTE: none of this touches the existing /api/lessons routes.
-
-/** A consistent 501 stub response for not-yet-implemented Courses endpoints. */
-function coursesStub(route: string): Response {
-  return json(
-    { error: 'Not Implemented', todo: `WAT-8 stub — ${route} not implemented yet` },
-    501,
-  )
-}
 
 // DB row shape for the normalized lesson list query.
 interface NormalizedLessonRow {
@@ -1448,26 +1455,62 @@ export default {
         return json({ error: 'Method not allowed' }, 405)
       }
 
-      // /api/courses  (collection: list / create — WAT-8 stub)
-      if (path === '/api/courses') {
-        if (request.method === 'GET') return coursesStub('GET /api/courses')
-        if (request.method === 'POST') return coursesStub('POST /api/courses')
+      // ── WAT-14 Course-container routes (match deepest paths first) ─────────
+      // /api/courses/:id/lessons/:lessonId  (remove a lesson from the course)
+      const courseRemoveLessonMatch = path.match(/^\/api\/courses\/([^/]+)\/lessons\/([^/]+)$/)
+      if (courseRemoveLessonMatch) {
+        const cid = decodeURIComponent(courseRemoveLessonMatch[1])
+        const lid = decodeURIComponent(courseRemoveLessonMatch[2])
+        if (request.method === 'DELETE') return removeCourseLesson(env, cid, lid)
         return json({ error: 'Method not allowed' }, 405)
       }
-      // /api/courses/:id  (item: get / update / delete — WAT-8 stub)
-      const courseMatch = path.match(/^\/api\/courses\/([^/]+)$/)
-      if (courseMatch) {
-        if (['GET', 'PUT', 'DELETE'].includes(request.method)) {
-          return coursesStub(`${request.method} /api/courses/:id`)
-        }
-        return json({ error: 'Method not allowed' }, 405)
-      }
-      // /api/courses/:id/lessons  (course ↔ lesson membership)
+
+      // /api/courses/:id/lessons  (add a lesson to the course)
       const courseLessonsMatch = path.match(/^\/api\/courses\/([^/]+)\/lessons$/)
       if (courseLessonsMatch) {
-        if (['GET', 'POST'].includes(request.method)) {
-          return coursesStub(`${request.method} /api/courses/:id/lessons`)
-        }
+        const cid = decodeURIComponent(courseLessonsMatch[1])
+        if (request.method === 'POST') return addCourseLesson(env, cid, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/:id/reorder
+      const courseReorderMatch = path.match(/^\/api\/courses\/([^/]+)\/reorder$/)
+      if (courseReorderMatch) {
+        const cid = decodeURIComponent(courseReorderMatch[1])
+        if (request.method === 'POST') return reorderCourse(env, cid, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/:id/publish
+      const coursePublishMatch = path.match(/^\/api\/courses\/([^/]+)\/publish$/)
+      if (coursePublishMatch) {
+        const cid = decodeURIComponent(coursePublishMatch[1])
+        if (request.method === 'POST') return publishCourse(env, cid)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/:id/unpublish
+      const courseUnpublishMatch = path.match(/^\/api\/courses\/([^/]+)\/unpublish$/)
+      if (courseUnpublishMatch) {
+        const cid = decodeURIComponent(courseUnpublishMatch[1])
+        if (request.method === 'POST') return unpublishCourse(env, cid)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses  (list / create)
+      if (path === '/api/courses') {
+        if (request.method === 'GET') return listCourses(env)
+        if (request.method === 'POST') return createCourse(env, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/:id  (get / patch / delete)
+      const courseMatch = path.match(/^\/api\/courses\/([^/]+)$/)
+      if (courseMatch) {
+        const cid = decodeURIComponent(courseMatch[1])
+        if (request.method === 'GET') return getCourse(env, cid)
+        if (request.method === 'PATCH') return patchCourse(env, cid, request)
+        if (request.method === 'DELETE') return deleteCourse(env, cid)
         return json({ error: 'Method not allowed' }, 405)
       }
 
@@ -1505,6 +1548,31 @@ export default {
         if (request.method === 'GET') return getLesson(env, id)
         if (request.method === 'PUT') return upsertLesson(env, id, request)
         if (request.method === 'DELETE') return deleteLesson(env, id)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // ── WAT-14 PUBLIC course learner routes (match BEFORE /api/learn/:slug) ─
+      // /api/learn/c/:slug/start  (create-or-resume a course learner)
+      const courseLearnStartMatch = path.match(/^\/api\/learn\/c\/([^/]+)\/start$/)
+      if (courseLearnStartMatch) {
+        const slug = decodeURIComponent(courseLearnStartMatch[1])
+        if (request.method === 'POST') return startCourseLearner(env, slug, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/learn/c/:slug/progress  (mark one member lesson complete)
+      const courseLearnProgressMatch = path.match(/^\/api\/learn\/c\/([^/]+)\/progress$/)
+      if (courseLearnProgressMatch) {
+        const slug = decodeURIComponent(courseLearnProgressMatch[1])
+        if (request.method === 'POST') return saveCourseProgress(env, slug, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/learn/c/:slug  (resolve a course share-link slug)
+      const courseLearnMatch = path.match(/^\/api\/learn\/c\/([^/]+)$/)
+      if (courseLearnMatch) {
+        const slug = decodeURIComponent(courseLearnMatch[1])
+        if (request.method === 'GET') return getCourseBySlug(env, slug, url)
         return json({ error: 'Method not allowed' }, 405)
       }
 

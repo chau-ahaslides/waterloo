@@ -13,8 +13,10 @@ import type { NormalizedLesson } from '@/api/courses-api'
 
 // --- Mock the courses API ---------------------------------------------------
 const fetchNormalizedLessons = vi.fn()
+const fetchCourses = vi.fn()
 vi.mock('@/api/courses-api', () => ({
   fetchNormalizedLessons: () => fetchNormalizedLessons(),
+  fetchCourses: () => fetchCourses(),
   // convertPresentation is used by CourseConverter (stubbed below)
   convertPresentation: vi.fn(),
 }))
@@ -46,7 +48,7 @@ function mountCoursesHome() {
   return mount(CoursesHome, {
     global: {
       plugins: [Antd],
-      stubs: { CourseConverter: true },
+      stubs: { CourseConverter: true, NewCourseModal: true },
     },
   })
 }
@@ -54,6 +56,7 @@ function mountCoursesHome() {
 beforeEach(() => {
   vi.clearAllMocks()
   fetchNormalizedLessons.mockResolvedValue([])
+  fetchCourses.mockResolvedValue([])
 })
 
 describe('CoursesHome.vue', () => {
@@ -150,5 +153,64 @@ describe('CoursesHome.vue', () => {
 
     const buttons = mountCoursesHome().findAll('button')
     expect(buttons.some((b) => b.text().includes('New lesson'))).toBe(true)
+  })
+
+  it('fetches courses on mount + renders a Courses tab', async () => {
+    const wrapper = mountCoursesHome()
+    await flushPromises()
+    expect(fetchCourses).toHaveBeenCalledOnce()
+    expect(wrapper.find('[data-testid="courses-tab"]').exists()).toBe(true)
+  })
+
+  it('switching to the Courses tab shows the courses grid + the empty state CTA', async () => {
+    fetchCourses.mockResolvedValue([])
+    const wrapper = mountCoursesHome()
+    await flushPromises()
+
+    // Click the Courses tab.
+    const coursesTab = wrapper.find('[data-testid="courses-tab"]')
+    await coursesTab.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Build your first course')
+    // The header button flips to "New course".
+    expect(wrapper.findAll('button').some((b) => b.text().includes('New course'))).toBe(true)
+  })
+
+  it('renders course cards (title, lesson count, order mode) on the Courses tab', async () => {
+    fetchCourses.mockResolvedValue([
+      {
+        id: 'c1',
+        title: 'Onboarding Course',
+        description: 'All the basics',
+        authMode: 'name',
+        orderMode: 'sequential',
+        status: 'published',
+        shareLinkSlug: 'abc',
+        lessonCount: 3,
+        totalDurationMinutes: 21,
+        createdAt: '2026-06-01T09:00:00Z',
+        updatedAt: '2026-06-01T09:00:00Z',
+      },
+    ])
+    const wrapper = mountCoursesHome()
+    await flushPromises()
+    await wrapper.find('[data-testid="courses-tab"]').trigger('click')
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('Onboarding Course')
+    expect(text).toContain('3 lessons')
+    expect(text).toContain('21 min')
+    expect(text).toContain('sequential')
+
+    // Clicking the course card navigates to the course-detail route.
+    const card = wrapper.find('[data-testid="course-card"]')
+    await card.trigger('click')
+    expect(push).toHaveBeenCalledWith({
+      name: 'course-detail',
+      params: { courseId: 'c1' },
+      query: { token: 'test' },
+    })
   })
 })

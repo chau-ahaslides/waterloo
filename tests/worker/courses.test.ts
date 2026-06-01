@@ -136,31 +136,21 @@ describe('WAT-8 migration — basic insert/select round-trips', () => {
   })
 })
 
-describe('WAT-8 — /api/courses stub routes', () => {
-  it('GET /api/courses → 501 Not Implemented', async () => {
+describe('WAT-14 — /api/courses routes are LIVE (no longer stubs)', () => {
+  it('GET /api/courses → 200 with a courses array', async () => {
     const res = await SELF.fetch(`${ORIGIN}/api/courses`)
-    expect(res.status).toBe(501)
-    const body = (await res.json()) as { error: string }
-    expect(body.error).toBe('Not Implemented')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { courses: unknown[] }
+    expect(Array.isArray(body.courses)).toBe(true)
   })
 
-  it('POST /api/courses → 501 Not Implemented', async () => {
-    const res = await SELF.fetch(`${ORIGIN}/api/courses`, { method: 'POST' })
-    expect(res.status).toBe(501)
-  })
-
-  it('GET /api/courses/:id → 501 Not Implemented', async () => {
-    const res = await SELF.fetch(`${ORIGIN}/api/courses/course_1`)
-    expect(res.status).toBe(501)
-  })
-
-  it('GET /api/courses/:id/lessons → 501 Not Implemented', async () => {
-    const res = await SELF.fetch(`${ORIGIN}/api/courses/course_1/lessons`)
-    expect(res.status).toBe(501)
+  it('GET /api/courses/:id (unknown) → 404', async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/courses/does_not_exist`)
+    expect(res.status).toBe(404)
   })
 
   it('returns 405 for an unsupported method on /api/courses', async () => {
-    const res = await SELF.fetch(`${ORIGIN}/api/courses`, { method: 'DELETE' })
+    const res = await SELF.fetch(`${ORIGIN}/api/courses`, { method: 'PUT' })
     expect(res.status).toBe(405)
   })
 
@@ -265,12 +255,13 @@ describe('WAT-10 — GET /api/courses/lessons', () => {
   })
 
   it('does not confuse /api/courses/lessons with /api/courses/:id routes', async () => {
-    // Exact path /api/courses/lessons hits our live route → 200
+    // Exact path /api/courses/lessons hits the normalized-lessons list → 200
     const lessonsRes = await SELF.fetch(`${ORIGIN}/api/courses/lessons`)
     expect(lessonsRes.status).toBe(200)
 
-    // A different id (not "lessons") hits the WAT-8 stub → 501
-    const stubRes = await SELF.fetch(`${ORIGIN}/api/courses/some_other_id`)
-    expect(stubRes.status).toBe(501)
+    // A different id (not "lessons") hits the WAT-14 course-detail route; an
+    // unknown course id → 404 (no longer the WAT-8 501 stub).
+    const courseRes = await SELF.fetch(`${ORIGIN}/api/courses/some_other_id`)
+    expect(courseRes.status).toBe(404)
   })
 })

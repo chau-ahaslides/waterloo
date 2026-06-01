@@ -23,12 +23,23 @@
  * NO leaderboard, NO points, NO score is shown anywhere — by design.
  */
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { fetchPublishedBySlug, type PublishedLesson, type PublishedSlide } from '@/api/courses-api'
 import { createLearnerSession, type LearnerSession } from '@/learn/useLearnerSession'
 
 const route = useRoute()
+const router = useRouter()
 const slug = route.params.slug as string
+
+// WAT-14 — course context: when launched from a course overview, the URL carries
+// ?course=<courseSlug>(&learner=<id>). On completion we return to the course
+// overview with ?completed=<lessonId> so it marks this lesson complete.
+const courseSlug = computed(() =>
+  typeof route.query.course === 'string' ? route.query.course : null,
+)
+const courseLearner = computed(() =>
+  typeof route.query.learner === 'string' ? route.query.learner : null,
+)
 
 type Phase = 'loading' | 'not-available' | 'landing' | 'player' | 'completion'
 const phase = ref<Phase>('loading')
@@ -165,8 +176,20 @@ async function nextQuestion(): Promise<void> {
 function advance(): void {
   const next = slideIndex.value + 1
   if (next >= totalSlides.value) {
-    phase.value = 'completion'
     void session?.saveProgress(totalSlides.value, true)
+    // In a course: return to the course overview, marking this lesson complete.
+    if (courseSlug.value) {
+      void router.replace({
+        name: 'learn-course',
+        params: { slug: courseSlug.value },
+        query: {
+          completed: lesson.value?.id ?? '',
+          ...(courseLearner.value ? { learner: courseLearner.value } : {}),
+        },
+      })
+      return
+    }
+    phase.value = 'completion'
     return
   }
   slideIndex.value = next

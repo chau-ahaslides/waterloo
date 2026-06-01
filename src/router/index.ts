@@ -18,7 +18,9 @@ import LessonEditor from '@/views/LessonEditor.vue'
 import PresentationList from '@/views/PresentationList.vue'
 import CoursesHome from '@/views/CoursesHome.vue'
 import CourseLessonDetail from '@/views/CourseLessonDetail.vue'
+import CourseDetail from '@/views/CourseDetail.vue'
 import LearnLesson from '@/views/LearnLesson.vue'
+import LearnCourse from '@/views/LearnCourse.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -64,6 +66,20 @@ const router = createRouter({
       path: '/courses/lessons/:id',
       name: 'courses-lesson-detail',
       component: CourseLessonDetail,
+    },
+    {
+      // WAT-14 — Course container detail / editor (trainer side).
+      path: '/courses/c/:courseId',
+      name: 'course-detail',
+      component: CourseDetail,
+    },
+    {
+      // WAT-14 — PUBLIC, MOBILE-FIRST learner landing for a published COURSE.
+      // Registered BEFORE /learn/:slug so the `c` segment isn't captured as a
+      // lesson slug.
+      path: '/learn/c/:slug',
+      name: 'learn-course',
+      component: LearnCourse,
     },
     {
       // WAT-12 — PUBLIC learner landing for a published lesson. Works for anyone

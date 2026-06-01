@@ -351,3 +351,238 @@ export async function recordLearnerResponse(
   })
   if (!res.ok) await parseError(res)
 }
+
+// ── Courses (container of lessons) — WAT-14 / Stage 6 ───────────────────────
+
+/** How lessons are navigated within a course. */
+export type OrderMode = 'free' | 'sequential'
+
+/** A course summary (the Courses tab list). */
+export interface CourseSummary {
+  id: string
+  title: string
+  description: string
+  authMode: AuthMode
+  orderMode: OrderMode
+  status: 'draft' | 'published' | 'unpublished'
+  shareLinkSlug: string | null
+  lessonCount: number
+  totalDurationMinutes: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** A member lesson within a course (trainer detail view). */
+export interface CourseMemberLesson {
+  courseLessonId: string
+  order: number
+  lessonId: string
+  title: string
+  status: 'draft' | 'published' | 'unpublished'
+  shareLinkSlug: string | null
+  estimatedDurationMinutes: number | null
+  slideCount: number
+}
+
+export interface CourseDetail {
+  id: string
+  title: string
+  description: string
+  authMode: AuthMode
+  orderMode: OrderMode
+  status: 'draft' | 'published' | 'unpublished'
+  shareLinkSlug: string | null
+  publishedAt: string | null
+  lessonCount: number
+  totalDurationMinutes: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CourseDetailResponse {
+  course: CourseDetail
+  lessons: CourseMemberLesson[]
+}
+
+/** List all courses, newest first. */
+export async function fetchCourses(): Promise<CourseSummary[]> {
+  const res = await fetch('/api/courses')
+  if (!res.ok) await parseError(res)
+  const body = (await res.json()) as { courses: CourseSummary[] }
+  return body.courses ?? []
+}
+
+/** Create a DRAFT course with an ordered set of member lessons. */
+export async function createCourse(input: {
+  title: string
+  description?: string
+  orderMode?: OrderMode
+  authMode?: AuthMode
+  lessonIds?: string[]
+}): Promise<CourseDetailResponse> {
+  const res = await fetch('/api/courses', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseDetailResponse>
+}
+
+/** GET one course + its ordered member lessons. */
+export async function fetchCourseDetail(id: string): Promise<CourseDetailResponse> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}`)
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseDetailResponse>
+}
+
+/** Edit course title/description/orderMode/authMode (any subset). */
+export async function patchCourse(
+  id: string,
+  patch: { title?: string; description?: string; orderMode?: OrderMode; authMode?: AuthMode },
+): Promise<CourseDetailResponse> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseDetailResponse>
+}
+
+/** Delete a course (and its membership). */
+export async function deleteCourse(id: string): Promise<void> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!res.ok) await parseError(res)
+}
+
+/** Add a lesson to a course (one-course-per-lesson; 409 if owned elsewhere). */
+export async function addCourseLesson(id: string, lessonId: string): Promise<CourseDetailResponse> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/lessons`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ lessonId }),
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseDetailResponse>
+}
+
+/** Remove a lesson from a course. */
+export async function removeCourseLesson(
+  id: string,
+  lessonId: string,
+): Promise<CourseDetailResponse> {
+  const res = await fetch(
+    `/api/courses/${encodeURIComponent(id)}/lessons/${encodeURIComponent(lessonId)}`,
+    { method: 'DELETE' },
+  )
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseDetailResponse>
+}
+
+/** Reorder member lessons by the new sequence of lesson ids. */
+export async function reorderCourse(
+  id: string,
+  lessonOrder: string[],
+): Promise<CourseDetailResponse> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/reorder`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ order: lessonOrder }),
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseDetailResponse>
+}
+
+/** Publish the course — mint a stable slug + snapshot the published members. */
+export async function publishCourse(id: string): Promise<CourseDetailResponse> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/publish`, { method: 'POST' })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseDetailResponse>
+}
+
+/** Take the course offline (slug retained). */
+export async function unpublishCourse(id: string): Promise<CourseDetailResponse> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/unpublish`, { method: 'POST' })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseDetailResponse>
+}
+
+// ── PUBLIC course learner (the /learn/c/:slug experience) ───────────────────
+
+export interface PublicCourseLesson {
+  lessonId: string
+  slug: string
+  title: string
+  order: number
+  estimatedDurationMinutes: number | null
+}
+
+export interface PublicCourse {
+  id: string
+  title: string
+  description: string
+  authMode: AuthMode
+  orderMode: OrderMode
+  totalDurationMinutes: number
+  lessons: PublicCourseLesson[]
+}
+
+export type CourseResolveResult =
+  | { available: true; course: PublicCourse; completedLessonIds: string[] }
+  | { available: false; error: string }
+
+/** PUBLIC: resolve a course share-link slug to its live published course. */
+export async function fetchCourseBySlug(
+  slug: string,
+  learnerId?: string,
+): Promise<CourseResolveResult> {
+  const qs = learnerId ? `?learnerId=${encodeURIComponent(learnerId)}` : ''
+  const res = await fetch(`/api/learn/c/${encodeURIComponent(slug)}${qs}`)
+  const body = (await res.json().catch(() => ({}))) as Partial<CourseResolveResult> & {
+    error?: string
+  }
+  if (res.ok && body.available) return body as CourseResolveResult
+  return { available: false, error: body.error ?? 'This course is not available.' }
+}
+
+export interface CourseLearnerStart {
+  learnerId: string
+  completedLessonIds: string[]
+}
+
+/** Create-or-resume a course learner (name/email courses). */
+export async function startCourseLearner(
+  slug: string,
+  identifier: string,
+): Promise<CourseLearnerStart> {
+  const res = await fetch(`/api/learn/c/${encodeURIComponent(slug)}/start`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ identifier }),
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseLearnerStart>
+}
+
+export interface CourseProgressResult {
+  ok: boolean
+  completedLessonIds: string[]
+  courseComplete: boolean
+}
+
+/** Mark one member lesson complete for a course learner. */
+export async function saveCourseLessonProgress(
+  slug: string,
+  learnerId: string,
+  lessonId: string,
+  completed: boolean,
+): Promise<CourseProgressResult> {
+  const res = await fetch(`/api/learn/c/${encodeURIComponent(slug)}/progress`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ learnerId, lessonId, completed }),
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseProgressResult>
+}
