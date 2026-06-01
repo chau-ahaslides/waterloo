@@ -14,6 +14,17 @@
     // static asset (with SPA fallback) without invoking the Worker at all.
     "run_worker_first": ["/api/*"]
   },
+  // D1 database that persists audience lesson attempts (WAT-5). Bound as
+  // `env.DB`. Schema lives in migrations/; apply with:
+  //   npx wrangler d1 migrations apply waterloo-lessons            (local)
+  //   npx wrangler d1 migrations apply waterloo-lessons --remote   (deployed)
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "waterloo-lessons",
+      "database_id": "175bbb2b-0de3-4ea5-8813-19b7647b933e"
+    }
+  ],
   "observability": {
     "enabled": true
   }

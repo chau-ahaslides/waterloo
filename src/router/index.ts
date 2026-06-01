@@ -12,6 +12,8 @@ import {
 } from 'vue-router'
 import Home from '@/views/Home.vue'
 import LessonPlay from '@/views/LessonPlay.vue'
+import TakeLesson from '@/views/TakeLesson.vue'
+import LessonReport from '@/views/LessonReport.vue'
 import PresentationList from '@/views/PresentationList.vue'
 
 const router = createRouter({
@@ -27,6 +29,18 @@ const router = createRouter({
       path: '/lesson/:id/play',
       name: 'lesson-play',
       component: LessonPlay,
+    },
+    {
+      // Real audience run — submits the attempt to the D1-backed API.
+      path: '/lesson/:id/take',
+      name: 'lesson-take',
+      component: TakeLesson,
+    },
+    {
+      // Per-lesson report of all audience attempts.
+      path: '/lesson/:id/report',
+      name: 'lesson-report',
+      component: LessonReport,
     },
   ],
 })

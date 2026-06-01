@@ -65,3 +65,33 @@ export function scoreForSlide(slide: AnyLessonSlide, response: unknown): number 
   if (!mod?.scoreFor) return 0
   return mod.scoreFor(slide, response)
 }
+
+/** A self-contained, report-friendly snapshot of one slide's response. */
+export interface ResponseSnapshot {
+  question: string
+  response: unknown
+  correct: boolean | null
+}
+
+/**
+ * Build a generic, persistable snapshot of a captured response for a slide,
+ * delegating to the owning module's `snapshotFor` when present. The fallback
+ * keeps things working for any future response-bearing type that hasn't
+ * implemented `snapshotFor` yet — it stores the raw response and derives
+ * correctness from `scoreFor`. NEVER hardcodes a concrete slide type.
+ */
+export function snapshotForSlide(
+  slide: AnyLessonSlide,
+  response: unknown,
+): ResponseSnapshot {
+  const mod = BY_TYPE.get(slide.type)
+  if (mod?.snapshotFor) return mod.snapshotFor(slide, response)
+  // Generic fallback: best-effort question text + raw response + score-derived
+  // correctness (only when the module scores responses).
+  const question =
+    (slide as { question?: string; title?: string }).question ??
+    (slide as { title?: string }).title ??
+    ''
+  const correct = mod?.scoreFor ? mod.scoreFor(slide, response) > 0 : null
+  return { question, response, correct }
+}

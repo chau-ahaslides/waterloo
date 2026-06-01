@@ -1,11 +1,21 @@
 import { fileURLToPath, URL } from 'node:url'
+import path from 'node:path'
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers'
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers'
 
 const alias = {
   '@': fileURLToPath(new URL('./src', import.meta.url)),
 }
+
+// Read the project's D1 migrations so the workers test project can apply them
+// into each test file's isolated D1 instance (via applyD1Migrations +
+// env.TEST_MIGRATIONS). Schema in tests then matches production exactly.
+const migrationsPath = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'migrations',
+)
+const migrations = await readD1Migrations(migrationsPath)
 
 // Two test projects with different runtimes:
 //   - "unit"    → jsdom, for the Vue component/interaction tests + API-client
@@ -27,12 +37,19 @@ export default defineConfig({
           environment: 'jsdom',
           globals: true,
           include: ['src/**/*.test.ts'],
+          // Stub window.matchMedia for Ant Design responsive components.
+          setupFiles: ['./src/test-setup.ts'],
         },
       },
       {
         plugins: [
           cloudflareTest({
             wrangler: { configPath: './wrangler.jsonc' },
+            miniflare: {
+              // Expose the parsed migrations to tests as env.TEST_MIGRATIONS so
+              // applyD1Migrations() can set up the schema per test file.
+              bindings: { TEST_MIGRATIONS: migrations },
+            },
           }),
         ],
         resolve: { alias },

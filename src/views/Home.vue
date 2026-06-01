@@ -3,11 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   AppstoreOutlined,
+  BarChartOutlined,
   BookOutlined,
   DeleteOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReadOutlined,
+  RocketOutlined,
 } from '@ant-design/icons-vue'
 import { getToken } from '@/api/presentations'
 import {
@@ -44,6 +46,14 @@ function questionCount(l: Lesson): number {
 
 function previewLesson(l: Lesson) {
   router.push({ name: 'lesson-play', params: { id: l.id }, query: route.query })
+}
+
+function takeLesson(l: Lesson) {
+  router.push({ name: 'lesson-take', params: { id: l.id }, query: route.query })
+}
+
+function reportLesson(l: Lesson) {
+  router.push({ name: 'lesson-report', params: { id: l.id }, query: route.query })
 }
 
 const dateFmt = new Intl.DateTimeFormat('en', { dateStyle: 'medium' })
@@ -153,17 +163,33 @@ function lessonColor(l: Lesson): string {
           </span>
           <span>{{ formatDate(l.createdAt) }}</span>
         </div>
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-2">
           <a-tag class="m-0 font-mono">#{{ l.presentationId }}</a-tag>
           <div class="flex items-center gap-1">
             <a-button
-              type="primary"
               size="small"
               class="inline-flex items-center"
               @click="previewLesson(l)"
             >
               <template #icon><PlayCircleOutlined /></template>
               Preview
+            </a-button>
+            <a-button
+              type="primary"
+              size="small"
+              class="inline-flex items-center"
+              @click="takeLesson(l)"
+            >
+              <template #icon><RocketOutlined /></template>
+              Take
+            </a-button>
+            <a-button
+              size="small"
+              class="inline-flex items-center"
+              @click="reportLesson(l)"
+            >
+              <template #icon><BarChartOutlined /></template>
+              Report
             </a-button>
             <a-popconfirm
               title="Delete this lesson?"

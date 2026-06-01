@@ -69,8 +69,15 @@ never reference a concrete type — they talk only to the registry + contract.
     - emits: response types → `answered` (payload = the response); info-only →
       `continue` (no payload),
   - `scoreFor(slide, response) => 0 | 1` — optional; response types only.
+  - `snapshotFor(slide, response) => { question, response, correct }` — optional;
+    builds a self-contained, report-friendly snapshot of a captured response.
+    The audience-submission flow stores this per response-bearing slide so the
+    report renders from persisted D1 data alone (the lesson definition lives only
+    in the creator's localStorage). The registry falls back to a generic snapshot
+    when a module omits it.
 - **Registry** — `src/slide-types/registry.ts`. Registers all modules and exposes
-  `convertRawSlide`, `getSlideComponent`, `typeHasResponse`, `scoreForSlide`.
+  `convertRawSlide`, `getSlideComponent`, `typeHasResponse`, `scoreForSlide`,
+  `snapshotForSlide`.
 - **Modules today** — `pickAnswer/` (multiple-choice, response, scored) and
   `infoSlide/` (maps AhaSlides `freestyle` content/heading slides → an info-only
   titled card with a Continue button, no response).
@@ -84,6 +91,58 @@ never reference a concrete type — they talk only to the registry + contract.
 
 The player, converter and ConverterModal pick it up automatically. See
 [`docs/SLIDE-TYPES.md`](./docs/SLIDE-TYPES.md) for the full walkthrough.
+
+## Lesson playback: preview, take & report (WAT-5)
+
+There is **one** shared player, `src/views/LessonPlayer.vue` — the slide-type-
+agnostic playback experience (header, progress, per-type rendering, scoring,
+auto-advance). It collects per-slide response snapshots generically via the
+registry's `snapshotForSlide` and emits `complete({ score, total, responses })`.
+Two routes embed it (never copy-paste a second player):
+
+- **Preview** — `src/views/LessonPlay.vue` (`/lesson/:id/play`). Local, NON-submitting
+  run with a "try again" completion screen. Reachable via the **Preview** button on
+  the Home lesson card.
+- **Take** — `src/views/TakeLesson.vue` (`/lesson/:id/take`). The REAL audience run:
+  a start screen (optional free-text name) → playback → POSTs the attempt to the
+  D1-backed API → confirmation + "View report" link. Audience can retake; each run
+  posts a NEW attempt. Reachable via the **Take** button on the Home lesson card.
+- **Report** — `src/views/LessonReport.vue` (`/lesson/:id/report`). Fetches all
+  attempts for a lesson and shows summary stats (attempt count, average score), an
+  attempts table (audience, when, score/total), and a per-question breakdown
+  (% correct) built entirely from the persisted response snapshots. Reachable via
+  the **Report** button on the Home lesson card and the take completion screen.
+  Handles loading / empty / error states.
+
+### Attempts API + D1 backend
+
+Audience submissions are persisted in a **Cloudflare D1** database
+`waterloo-lessons` (binding `env.DB` in `wrangler.jsonc`; database_id
+`175bbb2b-0de3-4ea5-8813-19b7647b933e`). Schema lives in `migrations/`
+(`0001_attempts.sql`). Apply with:
+
+```
+npx wrangler d1 migrations apply waterloo-lessons            # local
+npx wrangler d1 migrations apply waterloo-lessons --remote   # deployed
+```
+
+**Schema** — table `attempts`: `id` (text PK, UUID), `lesson_id` (text, indexed),
+`audience_name` (text, nullable), `score` (int), `total` (int), `responses`
+(JSON text — array of `{ slideId, type, question, response, correct }` snapshots),
+`created_at` (ISO-8601). Multiple attempts per lesson are allowed — every POST is
+a **new row** (no upsert/dedupe). Each row embeds a self-contained question/answer
+snapshot so the report renders from D1 alone (the lesson definition is
+localStorage-only).
+
+**Routes** (`worker/index.ts`, JSON in/out):
+
+| Verb | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/lessons/:lessonId/attempts` | Insert ONE attempt; returns `{ attempt }` (201). Body: `{ audienceName?, score, total, responses[] }`. |
+| GET  | `/api/lessons/:lessonId/attempts` | All attempts for a lesson, newest-first: `{ attempts[] }`. |
+
+Client: `src/api/attempts.ts` (`submitAttempt`, `fetchAttempts`) — calls the
+SAME-ORIGIN Worker via relative `/api/...` (not `presenter.dev`); no token needed.
 
 ## Testing
 

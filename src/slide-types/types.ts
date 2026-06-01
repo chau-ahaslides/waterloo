@@ -76,6 +76,21 @@ export interface SlideTypeModule<
    * (the player never calls it for them).
    */
   scoreFor?(slide: TSlide, response: TResponse): number
+
+  /**
+   * Build a self-contained, report-friendly snapshot of a captured response.
+   * The audience-submission page stores this per response-bearing slide so the
+   * report renders from the persisted data alone (the lesson definition lives
+   * only in the creator's localStorage). Only meaningful when `hasResponse` is
+   * true. Modules may omit it; the registry falls back to a generic snapshot.
+   *   - `question`: a human-readable prompt/title snapshot.
+   *   - `response`: a display-friendly description of what the audience picked.
+   *   - `correct`:  whether the response was correct, or null if N/A.
+   */
+  snapshotFor?(
+    slide: TSlide,
+    response: TResponse,
+  ): { question: string; response: unknown; correct: boolean | null }
 }
 
 /**

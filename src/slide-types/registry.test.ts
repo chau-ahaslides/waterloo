@@ -10,6 +10,7 @@ import {
   convertRawSlide,
   typeHasResponse,
   scoreForSlide,
+  snapshotForSlide,
 } from './registry'
 
 describe('registry — registration', () => {
@@ -90,5 +91,43 @@ describe('registry — response + scoring delegation', () => {
       order: 1,
     })!
     expect(scoreForSlide(info, null)).toBe(0)
+  })
+})
+
+describe('registry — snapshotForSlide', () => {
+  it('delegates to the pickAnswer module: question + chosen text + correctness', () => {
+    const slide = convertRawSlide({
+      id: 7,
+      type: 'pickAnswer',
+      slideType: null,
+      title: 'Capital of France?',
+      order: 1,
+      SlideOptions: [
+        { id: 5, title: 'Paris', correct: true, order: 1 },
+        { id: 6, title: 'Berlin', correct: false, order: 2 },
+      ],
+    })!
+    const correct = snapshotForSlide(slide, 5)
+    expect(correct.question).toBe('Capital of France?')
+    expect(correct.correct).toBe(true)
+    expect(correct.response).toMatchObject({ optionId: 5, text: 'Paris' })
+
+    const wrong = snapshotForSlide(slide, 6)
+    expect(wrong.correct).toBe(false)
+    expect(wrong.response).toMatchObject({ optionId: 6, text: 'Berlin' })
+  })
+
+  it('falls back generically for a type without snapshotFor (correct=null)', () => {
+    const info = convertRawSlide({
+      id: 8,
+      type: 'freestyle',
+      slideType: null,
+      title: 'Intro',
+      order: 1,
+    })!
+    const snap = snapshotForSlide(info, null)
+    // Info slide has no scoreFor ⇒ correctness is null; title used as question.
+    expect(snap.correct).toBeNull()
+    expect(snap.question).toBe('Intro')
   })
 })

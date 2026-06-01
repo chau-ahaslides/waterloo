@@ -64,4 +64,14 @@ export const pickAnswerModule: SlideTypeModule<
     const opt = slide.options.find((o) => o.id === response)
     return opt?.isCorrect ? 1 : 0
   },
+  snapshotFor(slide, response) {
+    const opt = slide.options.find((o) => o.id === response) ?? null
+    return {
+      question: slide.question,
+      // Store the chosen option's text (human-readable) plus its id for
+      // unambiguous aggregation in the report.
+      response: { optionId: response, text: opt?.text ?? '(no answer)' },
+      correct: opt ? opt.isCorrect : null,
+    }
+  },
 }
