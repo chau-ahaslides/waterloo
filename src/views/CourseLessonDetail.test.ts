@@ -25,6 +25,11 @@ const api = {
   regenerateQuestion: vi.fn(),
   regenerateLesson: vi.fn(),
   markLessonReviewed: vi.fn(),
+  fetchPublishState: vi.fn(),
+  setLessonAuthMode: vi.fn(),
+  publishLesson: vi.fn(),
+  updatePublishedLesson: vi.fn(),
+  unpublishLesson: vi.fn(),
 }
 vi.mock('@/api/courses-api', () => ({
   fetchLessonDetail: (...a: unknown[]) => api.fetchLessonDetail(...a),
@@ -34,7 +39,25 @@ vi.mock('@/api/courses-api', () => ({
   regenerateQuestion: (...a: unknown[]) => api.regenerateQuestion(...a),
   regenerateLesson: (...a: unknown[]) => api.regenerateLesson(...a),
   markLessonReviewed: (...a: unknown[]) => api.markLessonReviewed(...a),
+  fetchPublishState: (...a: unknown[]) => api.fetchPublishState(...a),
+  setLessonAuthMode: (...a: unknown[]) => api.setLessonAuthMode(...a),
+  publishLesson: (...a: unknown[]) => api.publishLesson(...a),
+  updatePublishedLesson: (...a: unknown[]) => api.updatePublishedLesson(...a),
+  unpublishLesson: (...a: unknown[]) => api.unpublishLesson(...a),
 }))
+
+function publishState(over: Record<string, unknown> = {}) {
+  return {
+    id: 'lesson-1',
+    status: 'draft',
+    reviewed: true,
+    authMode: 'name',
+    shareLinkSlug: null,
+    publishedAt: null,
+    hasDraftChanges: false,
+    ...over,
+  }
+}
 
 import CourseLessonDetail from './CourseLessonDetail.vue'
 
@@ -70,9 +93,10 @@ function detail(n: number, reviewed = false) {
   }
 }
 
-async function mountReady(n: number, reviewed = false) {
+async function mountReady(n: number, reviewed = false, pubOver: Record<string, unknown> = {}) {
   api.fetchLessonDetail.mockResolvedValue(detail(n, reviewed))
   api.markLessonReviewed.mockResolvedValue(detail(n, true))
+  api.fetchPublishState.mockResolvedValue(publishState({ reviewed, ...pubOver }))
   const wrapper = mount(CourseLessonDetail, { global: { plugins: [Antd] } })
   await flushPromises()
   return wrapper
@@ -165,5 +189,93 @@ describe('CourseLessonDetail.vue', () => {
     const wrapper = mount(CourseLessonDetail, { global: { plugins: [Antd] } })
     await flushPromises()
     expect(wrapper.text()).toContain('Could not load lesson')
+  })
+
+  // ── Publishing (WAT-12) ────────────────────────────────────────────────────
+
+  it('disables Publish while the lesson is not reviewed', async () => {
+    // Auto-review-on-open fails → the lesson stays unreviewed → publish disabled.
+    api.fetchLessonDetail.mockResolvedValue(detail(3, false))
+    api.markLessonReviewed.mockRejectedValue(new Error('offline'))
+    api.fetchPublishState.mockResolvedValue(publishState({ reviewed: false }))
+    const wrapper = mount(CourseLessonDetail, { global: { plugins: [Antd] } })
+    await flushPromises()
+    const btn = wrapper.find('button.publish-btn')
+    expect(btn.exists()).toBe(true)
+    expect(btn.attributes('disabled')).toBeDefined()
+    expect(api.publishLesson).not.toHaveBeenCalled()
+  })
+
+  it('enables Publish once reviewed and shows the link modal on publish', async () => {
+    api.publishLesson.mockResolvedValue(
+      publishState({ status: 'published', shareLinkSlug: 'abc123', publishedAt: '2026-06-01T00:00:00Z' }),
+    )
+    const wrapper = await mountReady(3, true)
+    const btn = wrapper.find('button.publish-btn')
+    expect(btn.attributes('disabled')).toBeUndefined()
+    await btn.trigger('click')
+    await flushPromises()
+    expect(api.publishLesson).toHaveBeenCalledWith('lesson-1', 'name')
+    // Modal renders into body (teleport) — assert on document.
+    expect(document.body.textContent).toContain('ahaslides.com/learn/abc123')
+  })
+
+  it('changing the auth-mode selector calls setLessonAuthMode', async () => {
+    api.setLessonAuthMode.mockResolvedValue(publishState({ authMode: 'email' }))
+    const wrapper = await mountReady(3, true)
+    const emailRadio = wrapper
+      .findAll('.auth-mode-group input')
+      .find((_i, idx) => idx === 2)
+    // Fallback: find by label text.
+    const labels = wrapper.findAll('.auth-mode-group label')
+    const emailLabel = labels.find((l) => l.text().includes('Email'))
+    await emailLabel!.find('input').setValue(true)
+    await flushPromises()
+    expect(api.setLessonAuthMode).toHaveBeenCalledWith('lesson-1', 'email')
+    void emailRadio
+  })
+
+  it('shows Update published + Unpublish when published with draft changes', async () => {
+    const wrapper = await mountReady(3, true, {
+      status: 'published',
+      shareLinkSlug: 'abc123',
+      hasDraftChanges: true,
+    })
+    expect(wrapper.find('.update-published-btn').exists()).toBe(true)
+    expect(wrapper.find('.unpublish-btn').exists()).toBe(true)
+    expect(wrapper.find('.view-link-btn').exists()).toBe(true)
+    // Not the bare Publish button anymore.
+    expect(wrapper.find('.publish-btn').exists()).toBe(false)
+  })
+
+  it('Update published version calls updatePublishedLesson', async () => {
+    api.updatePublishedLesson.mockResolvedValue(
+      publishState({ status: 'published', shareLinkSlug: 'abc123', hasDraftChanges: false }),
+    )
+    const wrapper = await mountReady(3, true, {
+      status: 'published',
+      shareLinkSlug: 'abc123',
+      hasDraftChanges: true,
+    })
+    await wrapper.find('button.update-published-btn').trigger('click')
+    await flushPromises()
+    expect(api.updatePublishedLesson).toHaveBeenCalledWith('lesson-1')
+  })
+
+  it('copy button writes the working URL to the clipboard', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    api.publishLesson.mockResolvedValue(
+      publishState({ status: 'published', shareLinkSlug: 'abc123' }),
+    )
+    const wrapper = await mountReady(3, true)
+    await wrapper.find('button.publish-btn').trigger('click')
+    await flushPromises()
+    // The copy button is in the modal (teleported); query the document.
+    const copyBtn = Array.from(document.querySelectorAll('.copy-link-btn')).at(-1) as HTMLElement
+    expect(copyBtn).toBeTruthy()
+    copyBtn.click()
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/learn/abc123`)
   })
 })

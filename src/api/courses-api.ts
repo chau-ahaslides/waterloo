@@ -193,3 +193,99 @@ export async function markLessonReviewed(id: string): Promise<LessonDetailRespon
   if (!res.ok) await parseError(res)
   return res.json() as Promise<LessonDetailResponse>
 }
+
+// ── Lesson publishing (WAT-12 / Stage 4) ────────────────────────────────────
+
+/** How learners identify themselves on the public link. */
+export type AuthMode = 'anonymous' | 'name' | 'email'
+
+/** The publishing surface the lesson-detail page renders + acts on. */
+export interface PublishState {
+  id: string
+  /** 'draft' (never published / unpublished-to-draft) | 'published' | 'unpublished'. */
+  status: 'draft' | 'published' | 'unpublished'
+  reviewed: boolean
+  authMode: AuthMode
+  /** Stable public slug; null until first publish. */
+  shareLinkSlug: string | null
+  /** ISO-8601 of the last publish / update-published; null until first publish. */
+  publishedAt: string | null
+  /** True when published AND the draft has unpromoted edits. */
+  hasDraftChanges: boolean
+}
+
+interface PublishStateResponse {
+  publishState: PublishState
+}
+
+/** GET the lesson's publishing state (slug, auth mode, status, draft-changes). */
+export async function fetchPublishState(id: string): Promise<PublishState> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}/publish-state`)
+  if (!res.ok) await parseError(res)
+  return ((await res.json()) as PublishStateResponse).publishState
+}
+
+/** Set the auth mode (before publishing). */
+export async function setLessonAuthMode(id: string, authMode: AuthMode): Promise<PublishState> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}/auth-mode`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ authMode }),
+  })
+  if (!res.ok) await parseError(res)
+  return ((await res.json()) as PublishStateResponse).publishState
+}
+
+/** Publish the lesson (gated server-side on reviewed). Generates the slug once. */
+export async function publishLesson(id: string, authMode?: AuthMode): Promise<PublishState> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}/publish`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(authMode ? { authMode } : {}),
+  })
+  if (!res.ok) await parseError(res)
+  return ((await res.json()) as PublishStateResponse).publishState
+}
+
+/** Promote the current draft to the live published version (slug unchanged). */
+export async function updatePublishedLesson(id: string): Promise<PublishState> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}/update-published`, {
+    method: 'POST',
+  })
+  if (!res.ok) await parseError(res)
+  return ((await res.json()) as PublishStateResponse).publishState
+}
+
+/** Take the lesson offline (the public link then shows "not available"). */
+export async function unpublishLesson(id: string): Promise<PublishState> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}/unpublish`, {
+    method: 'POST',
+  })
+  if (!res.ok) await parseError(res)
+  return ((await res.json()) as PublishStateResponse).publishState
+}
+
+// ── Public learner resolve (WAT-12; player is Stage 5) ──────────────────────
+
+export interface PublishedLesson {
+  id: string
+  title: string
+  authMode: AuthMode
+  slides: Array<{ order: number; type: 'question' | 'explanation'; content: Record<string, unknown> }>
+}
+
+export type LearnResolveResult =
+  | { available: true; lesson: PublishedLesson }
+  | { available: false; error: string }
+
+/** PUBLIC: resolve a share-link slug to its live published lesson (or not-available). */
+export async function fetchPublishedBySlug(slug: string): Promise<LearnResolveResult> {
+  const res = await fetch(`/api/learn/${encodeURIComponent(slug)}`)
+  const body = (await res.json().catch(() => ({}))) as Partial<LearnResolveResult> & {
+    error?: string
+  }
+  if (res.ok && body.available) {
+    return body as LearnResolveResult
+  }
+  return { available: false, error: body.error ?? 'This lesson is not available.' }
+}

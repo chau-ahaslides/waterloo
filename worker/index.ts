@@ -856,6 +856,287 @@ async function markReviewed(env: Env, id: string): Promise<Response> {
   return getLessonDetail(env, id)
 }
 
+// ── Lesson publishing (WAT-12 / Stage 4) ─────────────────────────────────────
+//
+// The `lesson_slides` rows are the editable DRAFT. Publish/update-published
+// SNAPSHOT the draft into lessons.published_slides_json + published_title; the
+// public link serves ONLY that snapshot, so the live version keeps serving while
+// the trainer edits. See migrations/0005_lesson_publishing.sql for the full
+// versioning rationale (slug stable, draft-vs-live, learner progress preserved).
+//
+//   GET   /api/courses/lessons/:id/publish-state         → publishing fields
+//   PUT   /api/courses/lessons/:id/auth-mode             → set auth_mode (pre-publish)
+//   POST  /api/courses/lessons/:id/publish               → first publish (gated on reviewed)
+//   POST  /api/courses/lessons/:id/update-published      → promote draft→live (keep slug)
+//   POST  /api/courses/lessons/:id/unpublish             → take offline
+//   GET   /api/learn/:slug                               → PUBLIC resolve slug→published
+
+type AuthMode = 'anonymous' | 'name' | 'email'
+
+const AUTH_MODES: AuthMode[] = ['anonymous', 'name', 'email']
+
+function normalizeAuthMode(v: unknown): AuthMode | null {
+  return typeof v === 'string' && (AUTH_MODES as string[]).includes(v) ? (v as AuthMode) : null
+}
+
+/** Full publishing-state row for a lesson (a superset of DetailLessonRow). */
+interface PublishStateRow {
+  id: string
+  title: string
+  status: string
+  reviewed: number | null
+  share_link_slug: string | null
+  auth_mode: string | null
+  published_title: string | null
+  published_slides_json: string | null
+  published_at: string | null
+  updated_at: string
+}
+
+async function loadPublishState(env: Env, id: string): Promise<PublishStateRow | null> {
+  return env.DB.prepare(
+    `SELECT id, title, status, reviewed, share_link_slug, auth_mode,
+            published_title, published_slides_json, published_at, updated_at
+       FROM lessons WHERE id = ?`,
+  )
+    .bind(id)
+    .first<PublishStateRow>()
+}
+
+/**
+ * Serialize the publishing surface the lesson-detail UI needs. `hasDraftChanges`
+ * is true when the lesson is published but the draft has been edited since the
+ * last publish/promote (updated_at strictly after published_at) — i.e. there's
+ * an unpublished draft to promote.
+ */
+function publishStateBody(row: PublishStateRow) {
+  const status = row.status === 'published' ? 'published' : row.status === 'unpublished' ? 'unpublished' : 'draft'
+  const hasDraftChanges =
+    status === 'published' &&
+    !!row.published_at &&
+    new Date(row.updated_at).getTime() > new Date(row.published_at).getTime()
+  return {
+    id: row.id,
+    status,
+    reviewed: !!row.reviewed,
+    authMode: normalizeAuthMode(row.auth_mode) ?? 'name',
+    shareLinkSlug: row.share_link_slug,
+    publishedAt: row.published_at,
+    hasDraftChanges,
+  }
+}
+
+/** GET /api/courses/lessons/:id/publish-state — publishing fields for the UI. */
+async function getPublishState(env: Env, id: string): Promise<Response> {
+  const row = await loadPublishState(env, id)
+  if (!row) return json({ error: 'Lesson not found' }, 404)
+  return json({ publishState: publishStateBody(row) })
+}
+
+/** PUT /api/courses/lessons/:id/auth-mode — set auth_mode (before publishing). */
+async function setAuthMode(env: Env, id: string, request: Request): Promise<Response> {
+  let body: Record<string, unknown>
+  try {
+    body = (await request.json()) as Record<string, unknown>
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400)
+  }
+  const mode = normalizeAuthMode(body.authMode)
+  if (!mode) {
+    return json({ error: "authMode must be one of 'anonymous' | 'name' | 'email'" }, 400)
+  }
+  const res = await env.DB.prepare(
+    `UPDATE lessons SET auth_mode = ?, updated_at = ? WHERE id = ?`,
+  )
+    .bind(mode, new Date().toISOString(), id)
+    .run()
+  if (!res.meta || (res.meta.changes ?? 0) === 0) {
+    return json({ error: 'Lesson not found' }, 404)
+  }
+  return getPublishState(env, id)
+}
+
+/** A short, URL-safe, lowercase slug (no ambiguous chars). */
+function makeSlug(): string {
+  const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789'
+  let s = ''
+  const bytes = crypto.getRandomValues(new Uint8Array(10))
+  for (const b of bytes) s += alphabet[b % alphabet.length]
+  return s
+}
+
+/** Build the published snapshot JSON from the current draft slides. */
+async function snapshotDraftSlides(env: Env, lessonId: string): Promise<string> {
+  const { results } = await env.DB.prepare(
+    `SELECT "order", type, content FROM lesson_slides WHERE lesson_id = ? ORDER BY "order" ASC`,
+  )
+    .bind(lessonId)
+    .all<{ order: number; type: string; content: string }>()
+  const slides = (results ?? []).map((s) => ({
+    order: s.order,
+    type: s.type === 'question' ? 'question' : 'explanation',
+    content: parseContent(s.content),
+  }))
+  return JSON.stringify(slides)
+}
+
+/**
+ * POST /api/courses/lessons/:id/publish — first publish (or re-publish from
+ * unpublished). Requires reviewed=true (409 otherwise). Generates a unique slug
+ * ONLY on the first ever publish; reuses the existing slug afterwards. Snapshots
+ * the current draft as the live published version and persists auth_mode if a
+ * valid one is supplied in the body.
+ */
+async function publishLessonDetail(env: Env, id: string, request: Request): Promise<Response> {
+  const row = await loadPublishState(env, id)
+  if (!row) return json({ error: 'Lesson not found' }, 404)
+  if (!row.reviewed) {
+    return json(
+      { error: 'This lesson must be reviewed before it can be published.' },
+      409,
+    )
+  }
+
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await request.json()) as Record<string, unknown>
+  } catch {
+    body = {}
+  }
+  const requestedMode = normalizeAuthMode(body.authMode)
+  const authMode = requestedMode ?? normalizeAuthMode(row.auth_mode) ?? 'name'
+
+  // Slug: set once, then stable. Reuse on re-publish from unpublished.
+  let slug = row.share_link_slug
+  if (!slug) {
+    // Generate a unique slug (retry on the rare collision).
+    for (let i = 0; i < 5; i++) {
+      const candidate = makeSlug()
+      const clash = await env.DB.prepare(
+        `SELECT id FROM lessons WHERE share_link_slug = ?`,
+      )
+        .bind(candidate)
+        .first<{ id: string }>()
+      if (!clash) {
+        slug = candidate
+        break
+      }
+    }
+    if (!slug) return json({ error: 'Could not allocate a share link. Try again.' }, 500)
+  }
+
+  const snapshot = await snapshotDraftSlides(env, id)
+  const now = new Date().toISOString()
+  await env.DB.prepare(
+    `UPDATE lessons
+        SET status = 'published',
+            share_link_slug = ?,
+            auth_mode = ?,
+            published_slides_json = ?,
+            published_title = ?,
+            published_at = ?,
+            updated_at = ?
+      WHERE id = ?`,
+  )
+    .bind(slug, authMode, snapshot, row.title, now, now, id)
+    .run()
+
+  return getPublishState(env, id)
+}
+
+/**
+ * POST /api/courses/lessons/:id/update-published — promote the current draft to
+ * the live published version. Re-snapshots the draft + title and re-syncs
+ * published_at; the slug is untouched. 409 if the lesson was never published.
+ * Learner progress is preserved (we only overwrite the snapshot columns).
+ */
+async function updatePublished(env: Env, id: string): Promise<Response> {
+  const row = await loadPublishState(env, id)
+  if (!row) return json({ error: 'Lesson not found' }, 404)
+  if (!row.share_link_slug) {
+    return json({ error: 'This lesson has not been published yet.' }, 409)
+  }
+
+  const snapshot = await snapshotDraftSlides(env, id)
+  const now = new Date().toISOString()
+  await env.DB.prepare(
+    `UPDATE lessons
+        SET status = 'published',
+            published_slides_json = ?,
+            published_title = ?,
+            published_at = ?,
+            updated_at = ?
+      WHERE id = ?`,
+  )
+    .bind(snapshot, row.title, now, now, id)
+    .run()
+
+  return getPublishState(env, id)
+}
+
+/**
+ * POST /api/courses/lessons/:id/unpublish — take the lesson offline. The slug +
+ * snapshot are retained (so re-publishing reuses the same slug); the public link
+ * shows a "not available" state. Learner progress is preserved.
+ */
+async function unpublishLesson(env: Env, id: string): Promise<Response> {
+  const row = await loadPublishState(env, id)
+  if (!row) return json({ error: 'Lesson not found' }, 404)
+  await env.DB.prepare(
+    `UPDATE lessons SET status = 'unpublished', updated_at = ? WHERE id = ?`,
+  )
+    .bind(new Date().toISOString(), id)
+    .run()
+  return getPublishState(env, id)
+}
+
+/**
+ * GET /api/learn/:slug — PUBLIC resolve a share-link slug to its LIVE published
+ * lesson. No auth needed to fetch metadata (the learner player is Stage 5). For
+ * an unknown slug OR a lesson that is not currently 'published' (draft/
+ * unpublished), returns 404 { available: false } so the public page can show a
+ * "this lesson is not available" state. The returned slides are the published
+ * SNAPSHOT, never the live draft.
+ */
+async function getPublishedBySlug(env: Env, slug: string): Promise<Response> {
+  if (!slug) return json({ available: false, error: 'Missing slug' }, 404)
+  const row = await env.DB.prepare(
+    `SELECT id, title, status, auth_mode, published_title, published_slides_json
+       FROM lessons WHERE share_link_slug = ?`,
+  )
+    .bind(slug)
+    .first<{
+      id: string
+      title: string
+      status: string
+      auth_mode: string | null
+      published_title: string | null
+      published_slides_json: string | null
+    }>()
+
+  if (!row || row.status !== 'published' || !row.published_slides_json) {
+    return json({ available: false, error: 'This lesson is not available.' }, 404)
+  }
+
+  let slides: unknown[] = []
+  try {
+    const parsed = JSON.parse(row.published_slides_json)
+    if (Array.isArray(parsed)) slides = parsed
+  } catch {
+    slides = []
+  }
+
+  return json({
+    available: true,
+    lesson: {
+      id: row.id,
+      title: row.published_title ?? row.title,
+      authMode: normalizeAuthMode(row.auth_mode) ?? 'name',
+      slides,
+    },
+  })
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url)
@@ -928,6 +1209,47 @@ export default {
         return json({ error: 'Method not allowed' }, 405)
       }
 
+      // ── WAT-12 publishing routes ───────────────────────────────────────────
+      // /api/courses/lessons/:id/publish-state
+      const pubStateMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/publish-state$/)
+      if (pubStateMatch) {
+        const lid = decodeURIComponent(pubStateMatch[1])
+        if (request.method === 'GET') return getPublishState(env, lid)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/lessons/:id/auth-mode
+      const authModeMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/auth-mode$/)
+      if (authModeMatch) {
+        const lid = decodeURIComponent(authModeMatch[1])
+        if (request.method === 'PUT') return setAuthMode(env, lid, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/lessons/:id/publish
+      const pubMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/publish$/)
+      if (pubMatch) {
+        const lid = decodeURIComponent(pubMatch[1])
+        if (request.method === 'POST') return publishLessonDetail(env, lid, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/lessons/:id/update-published
+      const updPubMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/update-published$/)
+      if (updPubMatch) {
+        const lid = decodeURIComponent(updPubMatch[1])
+        if (request.method === 'POST') return updatePublished(env, lid)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/lessons/:id/unpublish
+      const unpubMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/unpublish$/)
+      if (unpubMatch) {
+        const lid = decodeURIComponent(unpubMatch[1])
+        if (request.method === 'POST') return unpublishLesson(env, lid)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
       // /api/courses/lessons/:id  (get detail / save edits)
       const lessonDetailMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)$/)
       if (lessonDetailMatch) {
@@ -994,6 +1316,14 @@ export default {
         if (request.method === 'GET') return getLesson(env, id)
         if (request.method === 'PUT') return upsertLesson(env, id, request)
         if (request.method === 'DELETE') return deleteLesson(env, id)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/learn/:slug  (PUBLIC — resolve a share-link slug to its published lesson)
+      const learnMatch = path.match(/^\/api\/learn\/([^/]+)$/)
+      if (learnMatch) {
+        const slug = decodeURIComponent(learnMatch[1])
+        if (request.method === 'GET') return getPublishedBySlug(env, slug)
         return json({ error: 'Method not allowed' }, 405)
       }
 

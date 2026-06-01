@@ -31,6 +31,11 @@ import {
   ArrowUpOutlined,
   ArrowDownOutlined,
   BulbOutlined,
+  ShareAltOutlined,
+  CopyOutlined,
+  LinkOutlined,
+  StopOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons-vue'
 import {
   fetchLessonDetail,
@@ -40,6 +45,13 @@ import {
   regenerateQuestion,
   regenerateLesson,
   markLessonReviewed,
+  fetchPublishState,
+  setLessonAuthMode,
+  publishLesson,
+  updatePublishedLesson,
+  unpublishLesson,
+  type AuthMode,
+  type PublishState,
   type LessonDetail,
   type LessonSlide,
 } from '@/api/courses-api'
@@ -109,7 +121,140 @@ onMounted(async () => {
       /* non-fatal — the trainer can still edit */
     }
   }
+  // Load the publishing surface (slug, auth mode, status). Non-fatal.
+  try {
+    publishState.value = await fetchPublishState(lessonId)
+  } catch {
+    /* publishing controls just stay hidden/disabled */
+  }
 })
+
+// ── Publishing (WAT-12) ────────────────────────────────────────────────────
+
+const publishState = ref<PublishState | null>(null)
+const publishing = ref(false)
+const updatingPublished = ref(false)
+const unpublishing = ref(false)
+const authModeSaving = ref(false)
+const shareModalOpen = ref(false)
+const copied = ref(false)
+
+const AUTH_MODE_OPTIONS: { value: AuthMode; label: string; hint: string }[] = [
+  { value: 'anonymous', label: 'Anonymous', hint: 'No identifier — learners start instantly.' },
+  { value: 'name', label: 'Name only', hint: 'Ask the learner for their name.' },
+  { value: 'email', label: 'Email required', hint: 'Ask for a valid email address.' },
+]
+
+const isPublished = computed(() => publishState.value?.status === 'published')
+const isUnpublished = computed(() => publishState.value?.status === 'unpublished')
+const isReviewed = computed(() => !!lesson.value?.reviewed)
+const hasDraftChanges = computed(() => !!publishState.value?.hasDraftChanges)
+
+/** The literal display link per spec; the working route is <origin>/learn/:slug. */
+const shareDisplayUrl = computed(() =>
+  publishState.value?.shareLinkSlug ? `ahaslides.com/learn/${publishState.value.shareLinkSlug}` : '',
+)
+const shareWorkingUrl = computed(() =>
+  publishState.value?.shareLinkSlug
+    ? `${window.location.origin}/learn/${publishState.value.shareLinkSlug}`
+    : '',
+)
+
+/** The auth mode the selector reflects (publishState wins once loaded). */
+const authMode = computed<AuthMode>(() => publishState.value?.authMode ?? 'name')
+
+async function onAuthModeChange(mode: AuthMode) {
+  if (!publishState.value || mode === publishState.value.authMode) return
+  authModeSaving.value = true
+  try {
+    publishState.value = await setLessonAuthMode(lessonId, mode)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : 'Could not update sign-in mode')
+  } finally {
+    authModeSaving.value = false
+  }
+}
+
+async function doPublish() {
+  if (!isReviewed.value) return
+  publishing.value = true
+  try {
+    publishState.value = await publishLesson(lessonId, authMode.value)
+    if (lesson.value) lesson.value.status = 'published'
+    shareModalOpen.value = true
+    message.success('Lesson published')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : 'Publish failed')
+  } finally {
+    publishing.value = false
+  }
+}
+
+async function doUpdatePublished() {
+  updatingPublished.value = true
+  try {
+    publishState.value = await updatePublishedLesson(lessonId)
+    message.success('Published version updated')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : 'Update failed')
+  } finally {
+    updatingPublished.value = false
+  }
+}
+
+function confirmUnpublish() {
+  Modal.confirm({
+    title: 'Take this lesson offline?',
+    content:
+      'The share link will show "this lesson is not available" until you publish again. The same link is kept, and existing learner progress is preserved.',
+    okText: 'Unpublish',
+    okType: 'danger',
+    cancelText: 'Cancel',
+    onOk: () => doUnpublish(),
+  })
+}
+
+async function doUnpublish() {
+  unpublishing.value = true
+  try {
+    publishState.value = await unpublishLesson(lessonId)
+    if (lesson.value) lesson.value.status = 'draft'
+    message.success('Lesson taken offline')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : 'Unpublish failed')
+  } finally {
+    unpublishing.value = false
+  }
+}
+
+function openShareModal() {
+  if (publishState.value?.shareLinkSlug) shareModalOpen.value = true
+}
+
+async function copyShareLink() {
+  const url = shareWorkingUrl.value
+  if (!url) return
+  try {
+    await navigator.clipboard.writeText(url)
+  } catch {
+    // Fallback for environments without the async clipboard API.
+    const ta = document.createElement('textarea')
+    ta.value = url
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+    } catch {
+      /* ignore */
+    }
+    document.body.removeChild(ta)
+  }
+  copied.value = true
+  message.success('Link copied')
+  setTimeout(() => {
+    copied.value = false
+  }, 2000)
+}
 
 // ── Title + duration ──────────────────────────────────────────────────────────
 
@@ -473,6 +618,91 @@ const optionLetters = ['A', 'B', 'C', 'D']
         </div>
       </header>
 
+      <!-- Publishing panel (WAT-12) -->
+      <section class="publish-panel mb-6 rounded-aha border-2 border-aha-lavender bg-white px-5 py-4 shadow-aha-sm">
+        <div class="mb-3 flex flex-wrap items-center gap-2">
+          <ShareAltOutlined class="text-aha-purple" />
+          <h2 class="text-sm font-extrabold uppercase tracking-wide text-aha-space">Publish &amp; share</h2>
+          <a-tag v-if="isPublished" color="green" class="publish-badge ml-1">Published</a-tag>
+          <a-tag v-else-if="isUnpublished" color="orange" class="publish-badge ml-1">Offline</a-tag>
+          <a-tag v-else class="publish-badge ml-1">Draft</a-tag>
+          <a-tag v-if="isPublished && hasDraftChanges" color="blue" class="draft-badge">Unpublished draft</a-tag>
+        </div>
+
+        <!-- Auth-mode selector (set before publishing) -->
+        <div class="mb-4">
+          <label class="mb-1 block text-xs font-semibold uppercase tracking-wide text-aha-indigo">
+            Who can take it — sign-in
+          </label>
+          <a-radio-group
+            :value="authMode"
+            :disabled="authModeSaving"
+            button-style="solid"
+            class="auth-mode-group"
+            @change="(e: any) => onAuthModeChange(e.target.value)"
+          >
+            <a-radio-button v-for="o in AUTH_MODE_OPTIONS" :key="o.value" :value="o.value">
+              {{ o.label }}
+            </a-radio-button>
+          </a-radio-group>
+          <p class="mt-1 text-xs text-aha-indigo">
+            {{ AUTH_MODE_OPTIONS.find((o) => o.value === authMode)?.hint }}
+          </p>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Not yet published → Publish (gated on reviewed) -->
+          <a-tooltip
+            v-if="!isPublished"
+            :title="isReviewed ? '' : 'Review the lesson first — open and check the questions before publishing.'"
+          >
+            <a-button
+              type="primary"
+              class="publish-btn flex items-center"
+              :loading="publishing"
+              :disabled="!isReviewed"
+              @click="doPublish"
+            >
+              <template #icon><CloudUploadOutlined /></template>
+              {{ isUnpublished ? 'Re-publish' : 'Publish' }}
+            </a-button>
+          </a-tooltip>
+
+          <!-- Published → show link, update-published (when draft changed), unpublish -->
+          <template v-if="isPublished">
+            <a-button class="view-link-btn flex items-center" @click="openShareModal">
+              <template #icon><LinkOutlined /></template>
+              Share link
+            </a-button>
+            <a-button
+              v-if="hasDraftChanges"
+              type="primary"
+              class="update-published-btn flex items-center"
+              :loading="updatingPublished"
+              @click="doUpdatePublished"
+            >
+              <template #icon><CloudUploadOutlined /></template>
+              Update published version
+            </a-button>
+            <a-button
+              danger
+              class="unpublish-btn flex items-center"
+              :loading="unpublishing"
+              @click="confirmUnpublish"
+            >
+              <template #icon><StopOutlined /></template>
+              Unpublish
+            </a-button>
+          </template>
+        </div>
+
+        <p v-if="isPublished && hasDraftChanges" class="mt-2 text-xs text-aha-indigo">
+          You've edited this lesson since it was published. Learners still see the live version until you click
+          <strong>Update published version</strong>.
+        </p>
+      </section>
+
       <!-- Min-questions hint -->
       <a-alert
         v-if="questionCount <= MIN_QUESTIONS"
@@ -606,5 +836,31 @@ const optionLetters = ['A', 'B', 'C', 'D']
         </a-card>
       </div>
     </template>
+
+    <!-- Share-link modal (WAT-12) -->
+    <a-modal
+      v-model:open="shareModalOpen"
+      title="Your lesson is live"
+      :footer="null"
+      class="share-modal"
+    >
+      <p class="mb-3 text-sm text-aha-indigo">
+        Anyone with this link can take the lesson — no AhaSlides account needed.
+      </p>
+      <div class="flex items-center gap-2 rounded-aha border-2 border-aha-lavender bg-aha-blush px-3 py-2">
+        <LinkOutlined class="text-aha-purple" />
+        <code class="share-link-text flex-1 truncate text-sm font-semibold text-aha-space">
+          {{ shareDisplayUrl }}
+        </code>
+        <a-button type="primary" class="copy-link-btn flex items-center" @click="copyShareLink">
+          <template #icon><CopyOutlined /></template>
+          {{ copied ? 'Copied!' : 'Copy' }}
+        </a-button>
+      </div>
+      <p class="mt-3 text-xs text-aha-indigo">
+        Sign-in: <strong>{{ AUTH_MODE_OPTIONS.find((o) => o.value === authMode)?.label }}</strong>.
+        Re-publishing keeps this same link.
+      </p>
+    </a-modal>
   </main>
 </template>

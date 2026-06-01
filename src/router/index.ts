@@ -18,6 +18,7 @@ import LessonEditor from '@/views/LessonEditor.vue'
 import PresentationList from '@/views/PresentationList.vue'
 import CoursesHome from '@/views/CoursesHome.vue'
 import CourseLessonDetail from '@/views/CourseLessonDetail.vue'
+import LearnLesson from '@/views/LearnLesson.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -63,6 +64,14 @@ const router = createRouter({
       path: '/courses/lessons/:id',
       name: 'courses-lesson-detail',
       component: CourseLessonDetail,
+    },
+    {
+      // WAT-12 — PUBLIC learner landing for a published lesson. Works for anyone
+      // (no token/account); resolves the slug to the published snapshot. The real
+      // learner player is Stage 5 (WAT-13) — this shows published / not-available.
+      path: '/learn/:slug',
+      name: 'learn-lesson',
+      component: LearnLesson,
     },
   ],
 })
