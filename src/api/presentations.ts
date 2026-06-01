@@ -1,9 +1,22 @@
 // AhaSlides presentation-list API client.
 //
-// Auth: the JWT is read from the page URL (`?token=…`) and sent as
-// `Authorization: Bearer <token>`. The dev API allows CORS from any origin
-// (`access-control-allow-origin: *`, `access-control-allow-headers:
-// authorization`), so the browser can call it directly — no proxy needed.
+// Auth — two paths, picked automatically at runtime:
+//
+//  • EMBEDDED (served on / iframed under an *.ahaslides.com origin): the
+//    logged-in user's `ahaToken` domain cookie is swapped for a freshly-minted
+//    JWT via the general API (see `src/auth/embeddedAuth.ts`), and that JWT is
+//    sent as `Authorization: Bearer <jwt>`. This is the real SSO path.
+//
+//  • STANDALONE (the *.workers.dev deploy or local dev): no domain cookie
+//    exists, so we fall back — exactly as before — to the `?token=…` URL param
+//    and then the hard-coded DEV_TOKEN. The standalone deploy is unaffected by
+//    the embedded path.
+//
+// The dev API allows CORS from any origin (`access-control-allow-origin: *`,
+// `access-control-allow-headers: authorization`), so the browser calls it
+// directly — no proxy needed.
+
+import { getDomainCookieToken, getEmbeddedToken } from '@/auth/embeddedAuth'
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ?? 'https://presenter.dev.ahaslide.com'
@@ -11,14 +24,37 @@ const API_BASE =
 // TEMPORARY dev/inspection default — hard-coded so the bare URL
 // https://waterloo.ahaslides-game.workers.dev/ works without a ?token= param.
 // This exposes one account's presentations to anyone with the bare URL;
-// REMOVE before any real / multi-user use.
+// REMOVE before any real / multi-user use. Only ever reached on the standalone
+// deploy (no domain cookie); embedded origins use the swapped JWT instead.
 const DEV_TOKEN =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NDI3NTcsImlhdCI6MTc3OTI3NTUyMywiZXhwIjoxODQyMzQ3NTIzfQ.iVJ3bRoDOJ4mTag8DeBAEG3nujfYNK2vVWSH6pgxtLc'
 
-/** Read the bearer token from the current URL's `?token=` query param.
- *  Falls back to DEV_TOKEN when no param is present (temporary dev default). */
+/** Synchronous best-effort token, used for UI gating (`hasToken`) only.
+ *
+ *  Returns, in priority order: the raw domain SSO cookie (embedded), the
+ *  `?token=` URL param, then DEV_TOKEN. NOTE: when embedded, the value
+ *  returned here is the raw domain cookie, NOT the swapped JWT — it is only
+ *  used to answer "is there *some* auth?" for UI display. Actual API calls go
+ *  through `resolveAuthToken()`, which performs the cookie→swap→JWT exchange. */
 export function getToken(): string | null {
-  return new URLSearchParams(window.location.search).get('token') ?? DEV_TOKEN
+  return (
+    getDomainCookieToken() ??
+    new URLSearchParams(window.location.search).get('token') ??
+    DEV_TOKEN
+  )
+}
+
+/** Resolve the bearer token to send on a presenter API request.
+ *
+ *  EMBEDDED: swap the `ahaToken` domain cookie for a minted JWT (cached). If
+ *  the swap succeeds, that JWT is used. STANDALONE (or swap failure): fall
+ *  back gracefully to the synchronous `?token=` / DEV_TOKEN path so the live
+ *  workers.dev deploy keeps loading data. */
+export async function resolveAuthToken(): Promise<string | null> {
+  const embedded = await getEmbeddedToken()
+  if (embedded) return embedded
+  // No domain cookie, or swap failed → standalone fallback.
+  return getToken()
 }
 
 export interface Presentation {
@@ -73,8 +109,13 @@ export class ApiError extends Error {
  */
 export async function fetchPresentationList(
   params: ListParams = {},
-  token = getToken(),
+  token?: string | null,
 ): Promise<PresentationListResponse> {
+  // When no explicit token is passed, resolve via the embedded swap path
+  // (falling back to ?token= / DEV_TOKEN on the standalone deploy).
+  if (token === undefined) {
+    token = await resolveAuthToken()
+  }
   if (!token) {
     throw new ApiError('Missing token — add ?token=… to the URL.', 401)
   }

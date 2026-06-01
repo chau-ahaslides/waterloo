@@ -28,7 +28,7 @@
 //   - correct → boolean, marks the right answer(s)
 //   - image   → optional image URL (image-choice slides)
 
-import { ApiError, getToken } from './presentations'
+import { ApiError, resolveAuthToken } from './presentations'
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ?? 'https://presenter.dev.ahaslide.com'
@@ -77,8 +77,11 @@ export function isPickAnswerSlide(slide: RawSlide): boolean {
  */
 export async function fetchPresentationSlides(
   presentationId: number | string,
-  token = getToken(),
+  token?: string | null,
 ): Promise<RawSlide[]> {
+  if (token === undefined) {
+    token = await resolveAuthToken()
+  }
   if (!token) {
     throw new ApiError('Missing token — add ?token=… to the URL.', 401)
   }
@@ -103,7 +106,7 @@ export async function fetchPresentationSlides(
 /** Fetch only the "pick answer" slides of a presentation, in display order. */
 export async function fetchPickAnswerSlides(
   presentationId: number | string,
-  token = getToken(),
+  token?: string | null,
 ): Promise<RawSlide[]> {
   const slides = await fetchPresentationSlides(presentationId, token)
   return slides
