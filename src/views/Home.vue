@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   AppstoreOutlined,
   BookOutlined,
   DeleteOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   ReadOutlined,
 } from '@ant-design/icons-vue'
@@ -19,6 +20,8 @@ import { ahaPalettes } from '@/theme/brandTokens'
 
 const lessons = ref<Lesson[]>([])
 const converterOpen = ref(false)
+const route = useRoute()
+const router = useRouter()
 
 const hasToken = computed(() => !!getToken())
 
@@ -37,6 +40,10 @@ function removeLesson(id: string) {
 
 function questionCount(l: Lesson): number {
   return l.slides.length
+}
+
+function previewLesson(l: Lesson) {
+  router.push({ name: 'lesson-play', params: { id: l.id }, query: route.query })
 }
 
 const dateFmt = new Intl.DateTimeFormat('en', { dateStyle: 'medium' })
@@ -148,16 +155,26 @@ function lessonColor(l: Lesson): string {
         </div>
         <div class="flex items-center justify-between">
           <a-tag class="m-0 font-mono">#{{ l.presentationId }}</a-tag>
-          <a-popconfirm
-            title="Delete this lesson?"
-            ok-text="Delete"
-            cancel-text="Cancel"
-            @confirm="removeLesson(l.id)"
-          >
-            <a-button type="text" danger size="small">
-              <template #icon><DeleteOutlined /></template>
+          <a-space :size="4">
+            <a-button
+              type="primary"
+              size="small"
+              @click="previewLesson(l)"
+            >
+              <template #icon><PlayCircleOutlined /></template>
+              Preview
             </a-button>
-          </a-popconfirm>
+            <a-popconfirm
+              title="Delete this lesson?"
+              ok-text="Delete"
+              cancel-text="Cancel"
+              @confirm="removeLesson(l.id)"
+            >
+              <a-button type="text" danger size="small">
+                <template #icon><DeleteOutlined /></template>
+              </a-button>
+            </a-popconfirm>
+          </a-space>
         </div>
       </a-card>
     </div>

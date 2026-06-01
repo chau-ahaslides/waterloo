@@ -11,6 +11,7 @@ import {
   type RouteLocationNormalized,
 } from 'vue-router'
 import Home from '@/views/Home.vue'
+import LessonPlay from '@/views/LessonPlay.vue'
 import PresentationList from '@/views/PresentationList.vue'
 
 const router = createRouter({
@@ -21,6 +22,11 @@ const router = createRouter({
       path: '/presentations',
       name: 'presentations',
       component: PresentationList,
+    },
+    {
+      path: '/lesson/:id/play',
+      name: 'lesson-play',
+      component: LessonPlay,
     },
   ],
 })
