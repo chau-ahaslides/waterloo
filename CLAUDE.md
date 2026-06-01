@@ -187,6 +187,11 @@ Run through this checklist on every PR that touches a `.vue` file in `src/views/
 
 - [ ] If a `<template #cover>` root element needs `flex` centering, use `!flex` (Tailwind's `!important` prefix). Ant Design's `.ant-card-cover > *` rule forces `display: block` on direct children, silently overriding `.flex`. Use `!flex items-center justify-center` on the cover root to override it.
 
+### Button icon + label alignment
+
+- [ ] Every `<a-button>` that has both an `#icon` slot and a visible label must add `class="inline-flex items-center"` (or `class="flex items-center"` for block-level buttons). Without it, Ant Design's default `<span>` wrapper inside the button causes the icon and label to sit on different baselines, especially at `size="small"`.
+- [ ] Icon-only `<a-button>` (no visible label) should use `class="inline-flex items-center justify-center"` so the glyph is optically centred in the button hit-target.
+
 ### Header / control rows
 
 - [ ] Page headers that have a title block on the left and controls on the right must use `flex flex-wrap items-center justify-between gap-<N>`. Both the title `<div>` and the controls `<div>` must use `shrink-0` so they never collapse or overflow each other.

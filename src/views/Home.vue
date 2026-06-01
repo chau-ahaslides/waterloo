@@ -155,10 +155,11 @@ function lessonColor(l: Lesson): string {
         </div>
         <div class="flex items-center justify-between">
           <a-tag class="m-0 font-mono">#{{ l.presentationId }}</a-tag>
-          <a-space :size="4">
+          <div class="flex items-center gap-1">
             <a-button
               type="primary"
               size="small"
+              class="inline-flex items-center"
               @click="previewLesson(l)"
             >
               <template #icon><PlayCircleOutlined /></template>
@@ -170,11 +171,11 @@ function lessonColor(l: Lesson): string {
               cancel-text="Cancel"
               @confirm="removeLesson(l.id)"
             >
-              <a-button type="text" danger size="small">
+              <a-button type="text" danger size="small" class="inline-flex items-center justify-center">
                 <template #icon><DeleteOutlined /></template>
               </a-button>
             </a-popconfirm>
-          </a-space>
+          </div>
         </div>
       </a-card>
     </div>
