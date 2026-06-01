@@ -27,6 +27,10 @@ Vue 3 + Ant Design Vue app styled with the AhaSlides design-token theme, deploye
 
 Whenever a feature or fix is complete and verified, run `npm run deploy` to push it live, then confirm the deployed URL renders correctly. Do not consider a task finished until it is deployed.
 
+### ⚠️ SCREENSHOT EVERY UI CHANGE
+
+For any task that changes the UI, always include a screenshot of the affected screen in the Slack reply (use the fleet `POST $BASE/tasks/:id/slack/upload` endpoint to attach it natively). Verify the change in a real browser before replying.
+
 ## Pages
 
 ### Presentation list (`src/views/PresentationList.vue`)
