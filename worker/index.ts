@@ -35,6 +35,7 @@ import {
   resolvePresenterToken,
   runWorkersAi,
 } from './lessons-convert'
+import { getCourseAnalytics, getLessonAnalytics } from './analytics'
 import {
   addCourseLesson,
   createCourse,
@@ -1446,6 +1447,15 @@ export default {
         return json({ error: 'Method not allowed' }, 405)
       }
 
+      // ── WAT-15 lesson analytics (owner dashboard) ─────────────────────────
+      // /api/courses/lessons/:id/analytics  (match BEFORE the bare-id route)
+      const lessonAnalyticsMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/analytics$/)
+      if (lessonAnalyticsMatch) {
+        const lid = decodeURIComponent(lessonAnalyticsMatch[1])
+        if (request.method === 'GET') return getLessonAnalytics(env, lid)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
       // /api/courses/lessons/:id  (get detail / save edits)
       const lessonDetailMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)$/)
       if (lessonDetailMatch) {
@@ -1494,6 +1504,15 @@ export default {
       if (courseUnpublishMatch) {
         const cid = decodeURIComponent(courseUnpublishMatch[1])
         if (request.method === 'POST') return unpublishCourse(env, cid)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // ── WAT-15 course analytics (owner dashboard) ─────────────────────────
+      // /api/courses/:id/analytics  (match BEFORE the bare-id route)
+      const courseAnalyticsMatch = path.match(/^\/api\/courses\/([^/]+)\/analytics$/)
+      if (courseAnalyticsMatch) {
+        const cid = decodeURIComponent(courseAnalyticsMatch[1])
+        if (request.method === 'GET') return getCourseAnalytics(env, cid)
         return json({ error: 'Method not allowed' }, 405)
       }
 

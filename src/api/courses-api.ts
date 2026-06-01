@@ -586,3 +586,92 @@ export async function saveCourseLessonProgress(
   if (!res.ok) await parseError(res)
   return res.json() as Promise<CourseProgressResult>
 }
+
+// ── OWNER analytics / dashboards (WAT-15 / Stage 7) ─────────────────────────
+//
+// Owner-only progress dashboards over the Courses learner tables. Distinct from
+// the legacy audience Report (/lesson/:id/report), which reads the `attempts`
+// table — a different data model. These are never exposed on /learn routes.
+
+/** One question's response distribution in a lesson dashboard. */
+export interface QuestionAnalytics {
+  order: number
+  question: string
+  options: { index: number; label: string; count: number; isCorrect: boolean }[]
+  totalResponses: number
+  correctCount: number
+  correctRate: number
+  mostMissed: boolean
+}
+
+/** One learner row in the per-learner list (identified lessons only). */
+export interface LearnerAnalyticsRow {
+  identifier: string | null
+  status: 'joined' | 'in-progress' | 'completed'
+  currentSlideOrder: number
+  startedAt: string
+  completedAt: string | null
+}
+
+export interface LessonAnalytics {
+  lesson: {
+    id: string
+    title: string
+    status: 'draft' | 'published'
+    authMode: AuthMode
+    estimatedDurationMinutes: number | null
+  }
+  /** anonymous lessons → aggregate only; `learners` is null. */
+  anonymous: boolean
+  stats: {
+    joined: number
+    completed: number
+    completionRate: number
+    avgTimeToCompleteSeconds: number | null
+    estimatedDurationMinutes: number | null
+  }
+  learners: LearnerAnalyticsRow[] | null
+  questions: QuestionAnalytics[]
+}
+
+/** GET owner lesson dashboard analytics. */
+export async function fetchLessonAnalytics(id: string): Promise<LessonAnalytics> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}/analytics`)
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<LessonAnalytics>
+}
+
+export interface CourseLessonBreakdown {
+  lessonId: string
+  title: string
+  order: number
+  estimatedDurationMinutes: number | null
+  started: number
+  completed: number
+  dropOff: number
+  completionRate: number
+}
+
+export interface CourseAnalytics {
+  course: {
+    id: string
+    title: string
+    status: 'draft' | 'published' | 'unpublished'
+    authMode: AuthMode
+  }
+  anonymous: boolean
+  stats: {
+    joined: number
+    completed: number
+    completionRate: number
+    avgTimeToCompleteSeconds: number | null
+  }
+  lessons: CourseLessonBreakdown[]
+}
+
+/** GET owner course dashboard analytics. */
+export async function fetchCourseAnalytics(id: string): Promise<CourseAnalytics> {
+  const res = await fetch(`/api/courses/${encodeURIComponent(id)}/analytics`)
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<CourseAnalytics>
+}

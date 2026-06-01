@@ -36,6 +36,7 @@ import {
   LinkOutlined,
   StopOutlined,
   CloudUploadOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons-vue'
 import {
   fetchLessonDetail,
@@ -500,6 +501,11 @@ function goBack() {
   router.push({ name: 'courses-home', query: route.query })
 }
 
+/** Open the owner-facing progress dashboard for this lesson (WAT-15). */
+function openDashboard() {
+  router.push({ name: 'lesson-dashboard', params: { id: lessonId }, query: route.query })
+}
+
 onBeforeUnmount(() => {
   if (autosaveTimer) clearTimeout(autosaveTimer)
 })
@@ -519,6 +525,15 @@ const optionLetters = ['A', 'B', 'C', 'D']
         <span v-if="lesson?.reviewed" class="inline-flex items-center gap-1 text-xs text-aha-purple">
           <CheckCircleOutlined /> Reviewed
         </span>
+        <a-button
+          class="flex items-center"
+          :disabled="loading || !lesson"
+          data-testid="lesson-dashboard-btn"
+          @click="openDashboard"
+        >
+          <template #icon><BarChartOutlined /></template>
+          Dashboard
+        </a-button>
         <a-button
           danger
           class="flex items-center"

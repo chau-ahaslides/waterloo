@@ -21,6 +21,8 @@ import CourseLessonDetail from '@/views/CourseLessonDetail.vue'
 import CourseDetail from '@/views/CourseDetail.vue'
 import LearnLesson from '@/views/LearnLesson.vue'
 import LearnCourse from '@/views/LearnCourse.vue'
+import LessonDashboard from '@/views/LessonDashboard.vue'
+import CourseDashboard from '@/views/CourseDashboard.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -68,10 +70,22 @@ const router = createRouter({
       component: CourseLessonDetail,
     },
     {
+      // WAT-15 — OWNER-only lesson progress dashboard (reached from lesson detail).
+      path: '/courses/lessons/:id/dashboard',
+      name: 'lesson-dashboard',
+      component: LessonDashboard,
+    },
+    {
       // WAT-14 — Course container detail / editor (trainer side).
       path: '/courses/c/:courseId',
       name: 'course-detail',
       component: CourseDetail,
+    },
+    {
+      // WAT-15 — OWNER-only course progress dashboard (reached from course detail).
+      path: '/courses/c/:courseId/dashboard',
+      name: 'course-dashboard',
+      component: CourseDashboard,
     },
     {
       // WAT-14 — PUBLIC, MOBILE-FIRST learner landing for a published COURSE.

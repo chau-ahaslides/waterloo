@@ -22,6 +22,7 @@ import {
   ClockCircleOutlined,
   CheckOutlined,
   EditOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons-vue'
 import {
   fetchCourseDetail,
@@ -237,6 +238,10 @@ async function copyLink() {
 function goBack() {
   router.push({ name: 'courses-home', query: route.query })
 }
+/** Open the owner-facing course progress dashboard (WAT-15). */
+function openDashboard() {
+  router.push({ name: 'course-dashboard', params: { courseId }, query: route.query })
+}
 function statusColor(status: string): string {
   return status === 'published' ? 'green' : status === 'unpublished' ? 'orange' : 'default'
 }
@@ -318,6 +323,14 @@ function statusColor(status: string): string {
           </a-button>
           <a-button v-else :loading="publishing" data-testid="unpublish-btn" @click="doUnpublish">
             Take offline
+          </a-button>
+          <a-button
+            class="flex items-center"
+            data-testid="course-dashboard-btn"
+            @click="openDashboard"
+          >
+            <template #icon><BarChartOutlined /></template>
+            Dashboard
           </a-button>
         </div>
       </header>
