@@ -48,6 +48,23 @@ Confluence source: https://ahaslides.atlassian.net/wiki/spaces/AT/pages/18818662
 
 Key concepts every worker should know: **lessons** (self-paced content units), **converter** (presentation → course), **pick-answer/quiz slides** (engagement layer), **blended delivery** (live ↔ self-paced bridge). The product thesis is that AhaSlides' moat is offering both live and async delivery on one platform — no other tool does this well.
 
+## Thesis alignment check
+
+**MANDATORY** — applies to every build task, every worker, every round.
+
+Before implementing ANY feature or change:
+
+1. **Read `docs/PROJECT-THESIS.md`** (or re-fetch from the Confluence source if it may be stale). Pay close attention to the stated strategy and the **"What We Are NOT Building"** section.
+
+2. **If the build prompt contradicts the thesis** — e.g. it asks for something explicitly listed as out-of-scope, or it works against the stated strategy (blended live+async on one platform, AhaSlides moat, target personas) — **DO NOT silently build it.**
+
+3. **CHALLENGE BACK in the task's Slack thread**: state the specific contradiction, quote or reference the relevant thesis point (section + short excerpt), and ask the requester to confirm or adjust the scope before implementing.
+
+Example challenge format:
+> "This prompt asks for [X]. The project thesis (docs/PROJECT-THESIS.md, 'What We Are NOT Building') explicitly rules out [Y] because [reason]. Can you confirm you want to override that constraint, or shall we adjust the approach?"
+
+Re-fetch the thesis from Confluence (`https://ahaslides.atlassian.net/wiki/spaces/AT/pages/1881866288/Project+AhaSlides+e-Learning`) any time the local copy may be more than a few days old — the doc is updated periodically.
+
 ## Slide-type architecture
 
 Lessons are a sequence of slides of different **types**. The slide-type layer is
