@@ -25,6 +25,14 @@
  * `responses` snapshot so the report renders from D1 alone.
  */
 
+import {
+  ConvertError,
+  buildAndSaveLesson,
+  fetchPresentationDetail,
+  resolvePresenterToken,
+  runWorkersAi,
+} from './lessons-convert'
+
 /** One per-slide snapshot inside an attempt's `responses` array. */
 interface AttemptResponse {
   /** The lesson slide id (source presenter slide id). */
@@ -323,6 +331,59 @@ async function publishLesson(env: Env, id: string): Promise<Response> {
   return getLesson(env, id)
 }
 
+// ── Lesson conversion (WAT-9) ────────────────────────────────────────────────
+//
+// POST /api/lessons/convert — AI-generate a Lesson from an AhaSlides
+// presentation and persist it into the NORMALIZED Courses model (a `lessons`
+// row + interleaved `lesson_slides` rows), NOT the legacy `lessons.slides`
+// blob. See worker/lessons-convert.ts for the full pipeline + flagged
+// decisions (presenter-token source, WAT-1 relationship).
+
+/** POST /api/lessons/convert — body: { presentation_id, token? }. */
+async function convertLesson(env: Env, request: Request): Promise<Response> {
+  let body: Record<string, unknown>
+  try {
+    body = (await request.json()) as Record<string, unknown>
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400)
+  }
+
+  const presentationId =
+    typeof body.presentation_id === 'number'
+      ? String(body.presentation_id)
+      : typeof body.presentation_id === 'string'
+        ? body.presentation_id.trim()
+        : ''
+  if (!presentationId) {
+    return json({ error: 'Missing presentation_id' }, 400)
+  }
+
+  const token = resolvePresenterToken(
+    request.headers.get('authorization'),
+    body.token,
+  )
+
+  try {
+    const result = await buildAndSaveLesson(
+      env.DB,
+      {
+        fetchSlides: fetchPresentationDetail,
+        runAi: (prompt) => runWorkersAi(env.AI, prompt),
+      },
+      { presentationId, token },
+    )
+    return json(result, 201)
+  } catch (err) {
+    if (err instanceof ConvertError) {
+      return json({ error: err.message }, err.status)
+    }
+    return json(
+      { error: 'Conversion failed', detail: String((err as Error)?.message ?? err) },
+      500,
+    )
+  }
+}
+
 // ── Courses (WAT-8) — STUB routes ────────────────────────────────────────────
 //
 // Foundation stage: the Courses-feature data models exist in D1
@@ -351,6 +412,13 @@ export default {
     if (path.startsWith('/api/')) {
       if (path === '/api/health') {
         return json({ ok: true, service: 'waterloo' })
+      }
+
+      // /api/lessons/convert (WAT-9) — match BEFORE the bare-id route so
+      // "convert" isn't treated as a lesson id.
+      if (path === '/api/lessons/convert') {
+        if (request.method === 'POST') return convertLesson(env, request)
+        return json({ error: 'Method not allowed' }, 405)
       }
 
       // ── /api/courses (WAT-8 STUBS — no logic yet) ──────────────────────────

@@ -25,6 +25,15 @@
       "database_id": "175bbb2b-0de3-4ea5-8813-19b7647b933e"
     }
   ],
+  // Workers AI binding (WAT-9). Bound as `env.AI`; used by POST
+  // /api/lessons/convert to generate grounded multiple-choice questions from a
+  // presentation's text. Model: @cf/meta/llama-3.3-70b-instruct-fp8-fast.
+  "ai": {
+    "binding": "AI",
+    // Workers AI always accesses remote resources; this suppresses the local-dev
+    // warning and makes the remote access explicit.
+    "remote": true
+  },
   "observability": {
     "enabled": true
   }
