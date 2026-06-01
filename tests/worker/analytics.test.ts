@@ -232,6 +232,60 @@ describe('GET /api/courses/lessons/:id/analytics', () => {
     expect(q2.mostMissed).toBe(true) // lowest correct rate of the two questions
   })
 
+  it('standalone lesson (zero courses) — start→analytics round trip', async () => {
+    // This test proves that a lesson that has NEVER been added to any course
+    // still works fully: learners can start via the public API and the dashboard
+    // returns correct data. The learner row has course_id='' (sentinel, NOT NULL)
+    // and lesson_id set — the analytics queries exclusively on lesson_id.
+    const lid = await makeLesson({
+      id: 'SA1',
+      authMode: 'name',
+      durationMin: 5,
+      questions: [{ correct: 1 }],
+    })
+    // Publish the lesson so /learn/:slug/start accepts it.
+    const now = new Date().toISOString()
+    const snapshot = JSON.stringify([
+      { order: 0, type: 'question', content: { question: 'Q?', options: ['a', 'b', 'c', 'd'], correct_index: 1 } },
+      { order: 1, type: 'explanation', content: { explanation: 'Because b.' } },
+    ])
+    await env.DB.prepare(
+      `UPDATE lessons
+          SET status='published', share_link_slug='slug_sa1',
+              published_title='SA Lesson', published_slides_json=?, published_at=?
+        WHERE id='SA1'`,
+    )
+      .bind(snapshot, now)
+      .run()
+
+    // Start learner via the public API — no course involved.
+    const startRes = await api('/api/learn/slug_sa1/start', 'POST', { identifier: 'Solo' })
+    expect(startRes.status).toBe(200)
+    const { learnerId } = (await startRes.json()) as any
+    expect(learnerId).toBeTruthy()
+
+    // Mark progress.
+    await api('/api/learn/slug_sa1/progress', 'POST', { learnerId, currentSlideOrder: 2, completed: true })
+
+    // Dashboard should see 1 learner, 1 completed.
+    const dashRes = await api(`/api/courses/lessons/${lid}/analytics`)
+    expect(dashRes.status).toBe(200)
+    const body = (await dashRes.json()) as any
+    expect(body.stats.joined).toBe(1)
+    expect(body.stats.completed).toBe(1)
+    expect(body.stats.completionRate).toBe(100)
+    expect(body.learners).toHaveLength(1)
+    expect(body.learners[0].identifier).toBe('Solo')
+    expect(body.learners[0].status).toBe('completed')
+
+    // Confirm the learner row in DB uses the sentinel pattern (course_id='').
+    const row = await env.DB.prepare(`SELECT course_id, lesson_id FROM learners WHERE id=?`)
+      .bind(learnerId)
+      .first<{ course_id: string; lesson_id: string }>()
+    expect(row?.course_id).toBe('')
+    expect(row?.lesson_id).toBe('SA1')
+  })
+
   it('ignores responses from learners not on this lesson', async () => {
     const lid = await makeLesson({ id: 'L3', authMode: 'name', questions: [{ correct: 0 }] })
     await makeLearner({ id: 'mine', lessonId: lid, identifier: 'p', startedAt: '2026-06-01T10:00:00.000Z' })
