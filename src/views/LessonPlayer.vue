@@ -70,13 +70,22 @@ const slideNumber = computed(() => currentIndex.value + 1)
 const totalScored = computed(
   () => props.lesson.slides.filter((s) => typeHasResponse(s.type)).length,
 )
-/** Scored slides answered so far (before the current index). */
-const scoredAnswered = computed(
-  () =>
-    props.lesson.slides
-      .slice(0, currentIndex.value)
-      .filter((s) => typeHasResponse(s.type)).length,
-)
+/**
+ * Scored slides answered so far. Counts scored slides before the current index,
+ * plus the current slide while its feedback is showing — because `score` is
+ * tallied the instant a question is answered (in `onAnswered`), 800ms before
+ * `advance()` bumps `currentIndex`. Without counting the in-feedback slide here,
+ * the badge briefly reads e.g. "1 / 0 correct" (numerator ahead of denominator).
+ */
+const scoredAnswered = computed(() => {
+  const before = props.lesson.slides
+    .slice(0, currentIndex.value)
+    .filter((s) => typeHasResponse(s.type)).length
+  const current = currentSlide.value
+  const currentCounts =
+    showingFeedback.value && current && typeHasResponse(current.type) ? 1 : 0
+  return before + currentCounts
+})
 
 const progressPercent = computed(() =>
   totalSlides.value

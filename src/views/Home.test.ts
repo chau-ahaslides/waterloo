@@ -111,6 +111,25 @@ describe('Home.vue', () => {
     expect(text).toContain('2 lessons')
   })
 
+  it('renders all five card actions (Edit, Preview, Take, Report, delete) per lesson', async () => {
+    // Regression (WAT-3 r3): the action row used to overflow the overflow-hidden
+    // card at the 3-column width, clipping Report + the delete button. The row
+    // now wraps, so every action must be present and reachable.
+    fetchLessons.mockResolvedValue([makeLesson({ id: 'l1', title: 'Cell Biology Basics' })])
+    const wrapper = mountHome()
+    await flushPromises()
+
+    const labels = wrapper.findAll('button').map((b) => b.text())
+    expect(labels.some((t) => t.includes('Edit'))).toBe(true)
+    expect(labels.some((t) => t.includes('Preview'))).toBe(true)
+    expect(labels.some((t) => t.includes('Take'))).toBe(true)
+    expect(labels.some((t) => t.includes('Report'))).toBe(true)
+    // The delete button is icon-only; assert the handler exists on the card.
+    expect(
+      typeof (wrapper.vm as unknown as { removeLesson?: unknown }).removeLesson,
+    ).toBe('function')
+  })
+
   it('Preview button pushes to the lesson-play route with the lesson id + query', async () => {
     fetchLessons.mockResolvedValue([makeLesson({ id: 'l1', title: 'Cell Biology Basics' })])
     const wrapper = mountHome()

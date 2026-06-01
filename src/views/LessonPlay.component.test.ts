@@ -126,6 +126,25 @@ describe('LessonPlay.vue', () => {
     expect(wrapper.text()).toContain('1 / 1 correct')
   })
 
+  it('score badge denominator counts the current slide during its feedback window (no "1 / 0")', async () => {
+    // Regression (WAT-3 r3): `score` is tallied the instant a question is
+    // answered, 800ms before `currentIndex` advances. The "answered" denominator
+    // must count the in-feedback slide too, otherwise the badge briefly reads
+    // "1 / 0 correct" (numerator ahead of denominator) during the feedback delay.
+    fetchLesson.mockImplementation(async (id: string) =>
+      ([twoQuestionLesson()] as Lesson[]).find((l) => l.id === id) ?? null)
+    const wrapper = mountPlay()
+    await flushPromises()
+
+    await optionButton(wrapper, 'Paris')!.trigger('click')
+    await flushPromises()
+
+    // Still showing feedback (timer NOT advanced). Badge already reads 1 / 1.
+    expect(wrapper.text()).toContain('Correct!')
+    expect(wrapper.text()).toContain('1 / 1 correct')
+    expect(wrapper.text()).not.toContain('1 / 0 correct')
+  })
+
   it('after the last question shows the completion screen with the final score', async () => {
     fetchLesson.mockImplementation(async (id: string) =>
       ([twoQuestionLesson()] as Lesson[]).find((l) => l.id === id) ?? null)

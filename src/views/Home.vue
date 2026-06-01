@@ -194,61 +194,64 @@ function lessonColor(l: Lesson): string {
             {{ l.status }}
           </a-tag>
         </div>
-        <div class="mb-3 flex items-center gap-3 text-xs text-aha-indigo">
+        <div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-aha-indigo">
           <span class="inline-flex items-center gap-1">
             <BookOutlined /> {{ questionCount(l) }} slide{{
               questionCount(l) === 1 ? '' : 's'
             }}
           </span>
           <span>{{ formatDate(l.createdAt) }}</span>
+          <span class="font-mono">#{{ l.presentationId }}</span>
         </div>
-        <div class="flex items-center justify-between gap-2">
-          <a-tag class="m-0 font-mono">#{{ l.presentationId }}</a-tag>
-          <div class="flex items-center gap-1">
-            <a-button
-              size="small"
-              class="inline-flex items-center"
-              @click="editLesson(l)"
-            >
-              <template #icon><EditOutlined /></template>
-              Edit
+        <!--
+          Action row wraps (flex-wrap): five compact actions don't fit on one
+          line at the 3-column card width, so without wrapping the row overflows
+          the overflow-hidden card and Report/delete get clipped (WAT-3 r3 fix).
+        -->
+        <div class="flex flex-wrap items-center gap-1">
+          <a-button
+            size="small"
+            class="inline-flex items-center"
+            @click="editLesson(l)"
+          >
+            <template #icon><EditOutlined /></template>
+            Edit
+          </a-button>
+          <a-button
+            size="small"
+            class="inline-flex items-center"
+            @click="previewLesson(l)"
+          >
+            <template #icon><PlayCircleOutlined /></template>
+            Preview
+          </a-button>
+          <a-button
+            type="primary"
+            size="small"
+            class="inline-flex items-center"
+            @click="takeLesson(l)"
+          >
+            <template #icon><RocketOutlined /></template>
+            Take
+          </a-button>
+          <a-button
+            size="small"
+            class="inline-flex items-center"
+            @click="reportLesson(l)"
+          >
+            <template #icon><BarChartOutlined /></template>
+            Report
+          </a-button>
+          <a-popconfirm
+            title="Delete this lesson?"
+            ok-text="Delete"
+            cancel-text="Cancel"
+            @confirm="removeLesson(l.id)"
+          >
+            <a-button type="text" danger size="small" class="ml-auto inline-flex items-center justify-center">
+              <template #icon><DeleteOutlined /></template>
             </a-button>
-            <a-button
-              size="small"
-              class="inline-flex items-center"
-              @click="previewLesson(l)"
-            >
-              <template #icon><PlayCircleOutlined /></template>
-              Preview
-            </a-button>
-            <a-button
-              type="primary"
-              size="small"
-              class="inline-flex items-center"
-              @click="takeLesson(l)"
-            >
-              <template #icon><RocketOutlined /></template>
-              Take
-            </a-button>
-            <a-button
-              size="small"
-              class="inline-flex items-center"
-              @click="reportLesson(l)"
-            >
-              <template #icon><BarChartOutlined /></template>
-              Report
-            </a-button>
-            <a-popconfirm
-              title="Delete this lesson?"
-              ok-text="Delete"
-              cancel-text="Cancel"
-              @confirm="removeLesson(l.id)"
-            >
-              <a-button type="text" danger size="small" class="inline-flex items-center justify-center">
-                <template #icon><DeleteOutlined /></template>
-              </a-button>
-            </a-popconfirm>
-          </div>
+          </a-popconfirm>
         </div>
       </a-card>
     </div>
