@@ -8,9 +8,17 @@
 const API_BASE =
   import.meta.env.VITE_API_BASE ?? 'https://presenter.dev.ahaslide.com'
 
-/** Read the bearer token from the current URL's `?token=` query param. */
+// TEMPORARY dev/inspection default — hard-coded so the bare URL
+// https://waterloo.ahaslides-game.workers.dev/ works without a ?token= param.
+// This exposes one account's presentations to anyone with the bare URL;
+// REMOVE before any real / multi-user use.
+const DEV_TOKEN =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NDI3NTcsImlhdCI6MTc3OTI3NTUyMywiZXhwIjoxODQyMzQ3NTIzfQ.iVJ3bRoDOJ4mTag8DeBAEG3nujfYNK2vVWSH6pgxtLc'
+
+/** Read the bearer token from the current URL's `?token=` query param.
+ *  Falls back to DEV_TOKEN when no param is present (temporary dev default). */
 export function getToken(): string | null {
-  return new URLSearchParams(window.location.search).get('token')
+  return new URLSearchParams(window.location.search).get('token') ?? DEV_TOKEN
 }
 
 export interface Presentation {
