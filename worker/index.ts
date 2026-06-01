@@ -1101,15 +1101,18 @@ async function unpublishLesson(env: Env, id: string): Promise<Response> {
 async function getPublishedBySlug(env: Env, slug: string): Promise<Response> {
   if (!slug) return json({ available: false, error: 'Missing slug' }, 404)
   const row = await env.DB.prepare(
-    `SELECT id, title, status, auth_mode, published_title, published_slides_json
+    `SELECT id, title, description, status, auth_mode, estimated_duration_minutes,
+            published_title, published_slides_json
        FROM lessons WHERE share_link_slug = ?`,
   )
     .bind(slug)
     .first<{
       id: string
       title: string
+      description: string | null
       status: string
       auth_mode: string | null
+      estimated_duration_minutes: number | null
       published_title: string | null
       published_slides_json: string | null
     }>()
@@ -1131,10 +1134,196 @@ async function getPublishedBySlug(env: Env, slug: string): Promise<Response> {
     lesson: {
       id: row.id,
       title: row.published_title ?? row.title,
+      description: typeof row.description === 'string' ? row.description : '',
+      estimatedDurationMinutes:
+        typeof row.estimated_duration_minutes === 'number'
+          ? row.estimated_duration_minutes
+          : null,
       authMode: normalizeAuthMode(row.auth_mode) ?? 'name',
       slides,
     },
   })
+}
+
+// ── WAT-13 (Stage 5): PUBLIC learner progress persistence ────────────────────
+//
+// Anonymous learners persist in the BROWSER (localStorage, keyed by slug) — they
+// never touch these endpoints. Name/Email learners persist SERVER-SIDE here,
+// keyed by the (lesson, identifier) pair. No AhaSlides account or token: the
+// learner identifier is the only key. All three endpoints resolve the slug to
+// the LIVE published lesson first; a slug that isn't currently published 404s
+// (same not-available contract as GET /api/learn/:slug).
+//
+//   POST /api/learn/:slug/start     → create-or-resume a learner; returns
+//                                      { learnerId, currentSlideOrder, completedAt }
+//   POST /api/learn/:slug/progress  → upsert current_slide_order / completed_at
+//   POST /api/learn/:slug/response  → record one answer (lesson_slide order + value)
+//
+// `learner_responses.lesson_slide_id` stores the slide ORDER (as text) within the
+// published snapshot — the snapshot doesn't carry DB slide ids, and order is the
+// stable per-lesson slide key the player already navigates by.
+
+/** Resolve a slug to its LIVE published lesson id, or null if not available. */
+async function resolvePublishedLessonId(env: Env, slug: string): Promise<string | null> {
+  if (!slug) return null
+  const row = await env.DB.prepare(
+    `SELECT id, status, published_slides_json FROM lessons WHERE share_link_slug = ?`,
+  )
+    .bind(slug)
+    .first<{ id: string; status: string; published_slides_json: string | null }>()
+  if (!row || row.status !== 'published' || !row.published_slides_json) return null
+  return row.id
+}
+
+/** Read + parse a JSON request body; returns {} on any failure. */
+async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const v = await request.json()
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+interface ProgressRow {
+  id: string
+  current_slide_order: number
+  completed_at: string | null
+}
+
+/** Load the (single) progress row for a learner on a lesson, or null. */
+async function loadProgress(
+  env: Env,
+  learnerId: string,
+  lessonId: string,
+): Promise<ProgressRow | null> {
+  return env.DB.prepare(
+    `SELECT id, current_slide_order, completed_at
+       FROM learner_progress WHERE learner_id = ? AND lesson_id = ?`,
+  )
+    .bind(learnerId, lessonId)
+    .first<ProgressRow>()
+}
+
+/**
+ * POST /api/learn/:slug/start — create-or-resume a server-side learner for a
+ * name/email lesson. Body: { identifier: string }. Anonymous lessons don't use
+ * this (the client persists locally), but if called we still create a learner
+ * with a null identifier so the contract is uniform. Returns the learner id +
+ * any existing progress so the client can resume from the last completed slide.
+ */
+async function startLearner(env: Env, slug: string, request: Request): Promise<Response> {
+  const lessonId = await resolvePublishedLessonId(env, slug)
+  if (!lessonId) return json({ error: 'This lesson is not available.' }, 404)
+
+  const body = await readJsonBody(request)
+  const rawId = typeof body.identifier === 'string' ? body.identifier.trim() : ''
+  const identifier = rawId || null
+
+  // Resume: an identified learner already on this lesson reuses their row.
+  let learnerId: string | null = null
+  if (identifier) {
+    const existing = await env.DB.prepare(
+      `SELECT id FROM learners WHERE lesson_id = ? AND identifier = ? LIMIT 1`,
+    )
+      .bind(lessonId, identifier)
+      .first<{ id: string }>()
+    if (existing) learnerId = existing.id
+  }
+
+  if (!learnerId) {
+    learnerId = crypto.randomUUID()
+    await env.DB.prepare(
+      `INSERT INTO learners (id, course_id, lesson_id, identifier, created_at)
+       VALUES (?, '', ?, ?, ?)`,
+    )
+      .bind(learnerId, lessonId, identifier, new Date().toISOString())
+      .run()
+  }
+
+  const progress = await loadProgress(env, learnerId, lessonId)
+  return json({
+    learnerId,
+    currentSlideOrder: progress?.current_slide_order ?? 0,
+    completedAt: progress?.completed_at ?? null,
+  })
+}
+
+/**
+ * POST /api/learn/:slug/progress — upsert a learner's position.
+ * Body: { learnerId: string, currentSlideOrder: number, completed?: boolean }.
+ * Saved after every action so reopening resumes from the last completed slide.
+ */
+async function saveLearnerProgress(env: Env, slug: string, request: Request): Promise<Response> {
+  const lessonId = await resolvePublishedLessonId(env, slug)
+  if (!lessonId) return json({ error: 'This lesson is not available.' }, 404)
+
+  const body = await readJsonBody(request)
+  const learnerId = typeof body.learnerId === 'string' ? body.learnerId : ''
+  if (!learnerId) return json({ error: 'learnerId required' }, 400)
+  const currentSlideOrder =
+    typeof body.currentSlideOrder === 'number' && Number.isFinite(body.currentSlideOrder)
+      ? Math.max(0, Math.trunc(body.currentSlideOrder))
+      : 0
+  const completed = body.completed === true
+
+  const existing = await loadProgress(env, learnerId, lessonId)
+  const completedAt = completed ? new Date().toISOString() : null
+
+  if (existing) {
+    await env.DB.prepare(
+      `UPDATE learner_progress
+          SET current_slide_order = ?, completed_at = ?
+        WHERE id = ?`,
+    )
+      .bind(currentSlideOrder, completedAt, existing.id)
+      .run()
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO learner_progress
+         (id, learner_id, lesson_id, current_slide_order, completed_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+      .bind(crypto.randomUUID(), learnerId, lessonId, currentSlideOrder, completedAt)
+      .run()
+  }
+
+  return json({ ok: true, currentSlideOrder, completedAt })
+}
+
+/**
+ * POST /api/learn/:slug/response — record one answer.
+ * Body: { learnerId: string, slideOrder: number, value: unknown }.
+ * `value` is stored as JSON text in learner_responses.response_value, keyed by
+ * the slide order (as lesson_slide_id text).
+ */
+async function recordLearnerResponse(env: Env, slug: string, request: Request): Promise<Response> {
+  const lessonId = await resolvePublishedLessonId(env, slug)
+  if (!lessonId) return json({ error: 'This lesson is not available.' }, 404)
+
+  const body = await readJsonBody(request)
+  const learnerId = typeof body.learnerId === 'string' ? body.learnerId : ''
+  if (!learnerId) return json({ error: 'learnerId required' }, 400)
+  const slideOrder =
+    typeof body.slideOrder === 'number' && Number.isFinite(body.slideOrder)
+      ? Math.max(0, Math.trunc(body.slideOrder))
+      : 0
+
+  await env.DB.prepare(
+    `INSERT INTO learner_responses
+       (id, learner_id, lesson_slide_id, response_value, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      crypto.randomUUID(),
+      learnerId,
+      String(slideOrder),
+      JSON.stringify(body.value ?? null),
+      new Date().toISOString(),
+    )
+    .run()
+
+  return json({ ok: true })
 }
 
 export default {
@@ -1316,6 +1505,31 @@ export default {
         if (request.method === 'GET') return getLesson(env, id)
         if (request.method === 'PUT') return upsertLesson(env, id, request)
         if (request.method === 'DELETE') return deleteLesson(env, id)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // WAT-13 learner persistence — match the deeper paths BEFORE the bare slug.
+      // /api/learn/:slug/start  (PUBLIC — create-or-resume a server-side learner)
+      const learnStartMatch = path.match(/^\/api\/learn\/([^/]+)\/start$/)
+      if (learnStartMatch) {
+        const slug = decodeURIComponent(learnStartMatch[1])
+        if (request.method === 'POST') return startLearner(env, slug, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/learn/:slug/progress  (PUBLIC — upsert current slide / completion)
+      const learnProgressMatch = path.match(/^\/api\/learn\/([^/]+)\/progress$/)
+      if (learnProgressMatch) {
+        const slug = decodeURIComponent(learnProgressMatch[1])
+        if (request.method === 'POST') return saveLearnerProgress(env, slug, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/learn/:slug/response  (PUBLIC — record one answer)
+      const learnResponseMatch = path.match(/^\/api\/learn\/([^/]+)\/response$/)
+      if (learnResponseMatch) {
+        const slug = decodeURIComponent(learnResponseMatch[1])
+        if (request.method === 'POST') return recordLearnerResponse(env, slug, request)
         return json({ error: 'Method not allowed' }, 405)
       }
 

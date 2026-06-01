@@ -267,11 +267,20 @@ export async function unpublishLesson(id: string): Promise<PublishState> {
 
 // ── Public learner resolve (WAT-12; player is Stage 5) ──────────────────────
 
+/** One published slide (the snapshot shape served by GET /api/learn/:slug). */
+export interface PublishedSlide {
+  order: number
+  type: 'question' | 'explanation'
+  content: Record<string, unknown>
+}
+
 export interface PublishedLesson {
   id: string
   title: string
+  description: string
+  estimatedDurationMinutes: number | null
   authMode: AuthMode
-  slides: Array<{ order: number; type: 'question' | 'explanation'; content: Record<string, unknown> }>
+  slides: PublishedSlide[]
 }
 
 export type LearnResolveResult =
@@ -288,4 +297,57 @@ export async function fetchPublishedBySlug(slug: string): Promise<LearnResolveRe
     return body as LearnResolveResult
   }
   return { available: false, error: body.error ?? 'This lesson is not available.' }
+}
+
+// ── PUBLIC learner persistence (WAT-13 / Stage 5) ───────────────────────────
+//
+// Anonymous learners persist in localStorage (no network). Name/Email learners
+// persist server-side via these three endpoints, keyed by the learner id the
+// start call returns.
+
+export interface LearnerStart {
+  learnerId: string
+  currentSlideOrder: number
+  completedAt: string | null
+}
+
+/** Create-or-resume a server-side learner for a name/email lesson. */
+export async function startLearner(slug: string, identifier: string): Promise<LearnerStart> {
+  const res = await fetch(`/api/learn/${encodeURIComponent(slug)}/start`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ identifier }),
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<LearnerStart>
+}
+
+/** Upsert a learner's current slide / completion. Best-effort (fire-and-forget OK). */
+export async function saveLearnerProgress(
+  slug: string,
+  learnerId: string,
+  currentSlideOrder: number,
+  completed = false,
+): Promise<void> {
+  const res = await fetch(`/api/learn/${encodeURIComponent(slug)}/progress`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ learnerId, currentSlideOrder, completed }),
+  })
+  if (!res.ok) await parseError(res)
+}
+
+/** Record one answer for a server-side learner. */
+export async function recordLearnerResponse(
+  slug: string,
+  learnerId: string,
+  slideOrder: number,
+  value: unknown,
+): Promise<void> {
+  const res = await fetch(`/api/learn/${encodeURIComponent(slug)}/response`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ learnerId, slideOrder, value }),
+  })
+  if (!res.ok) await parseError(res)
 }
