@@ -48,6 +48,43 @@ Confluence source: https://ahaslides.atlassian.net/wiki/spaces/AT/pages/18818662
 
 Key concepts every worker should know: **lessons** (self-paced content units), **converter** (presentation → course), **pick-answer/quiz slides** (engagement layer), **blended delivery** (live ↔ self-paced bridge). The product thesis is that AhaSlides' moat is offering both live and async delivery on one platform — no other tool does this well.
 
+## Slide-type architecture
+
+Lessons are a sequence of slides of different **types**. The slide-type layer is
+**pluggable**: each type is a self-contained module under `src/slide-types/<name>/`
+that owns its conversion, its render+response component, and its tests. The
+generic player (`LessonPlay.vue`), converter (`lessons.ts`) and `ConverterModal.vue`
+never reference a concrete type — they talk only to the registry + contract.
+
+- **Contract** — `src/slide-types/types.ts` (`SlideTypeModule`). A module declares:
+  - `type` — the lesson slide-type key (e.g. `'pickAnswer'`, `'infoSlide'`),
+  - `hasResponse` — `true` = captures an answer (scored, auto-advances after
+    feedback); `false` = **info-only** (purely shows content, advances on a
+    Continue click, never scored),
+  - `convert(rawPresenterSlide) => LessonSlide | null` — recognise + map a raw
+    AhaSlides slide into this type, or `null` if it isn't this type,
+  - `component` — the Vue component that renders the slide in the audience/preview
+    view AND receives its own response. Contract for props/emits:
+    - props: `{ slide, showingFeedback, response }`
+    - emits: response types → `answered` (payload = the response); info-only →
+      `continue` (no payload),
+  - `scoreFor(slide, response) => 0 | 1` — optional; response types only.
+- **Registry** — `src/slide-types/registry.ts`. Registers all modules and exposes
+  `convertRawSlide`, `getSlideComponent`, `typeHasResponse`, `scoreForSlide`.
+- **Modules today** — `pickAnswer/` (multiple-choice, response, scored) and
+  `infoSlide/` (maps AhaSlides `freestyle` content/heading slides → an info-only
+  titled card with a Continue button, no response).
+
+### Adding a new slide type (NOTHING else changes)
+
+1. `mkdir src/slide-types/<name>/`, create `module.ts` (implements `SlideTypeModule`)
+   + `<Name>Slide.vue` (the render+response component) + `module.test.ts`
+   (convert + scoring/response + a component mount test).
+2. Add the module to `SLIDE_TYPE_MODULES` in `src/slide-types/registry.ts` (one line).
+
+The player, converter and ConverterModal pick it up automatically. See
+[`docs/SLIDE-TYPES.md`](./docs/SLIDE-TYPES.md) for the full walkthrough.
+
 ## Testing
 
 ### Policy
@@ -109,6 +146,9 @@ Vitest runs **two projects** (configured inline in `vitest.config.ts` via `test.
 | Feature | Test file |
 | --- | --- |
 | Lessons store + converter | `src/lessons/lessons.test.ts` |
+| Slide-type registry | `src/slide-types/registry.test.ts` |
+| Pick-answer slide-type module + component | `src/slide-types/pickAnswer/module.test.ts` |
+| Info slide-type module + component | `src/slide-types/infoSlide/module.test.ts` |
 | Presentations API client | `src/api/presentations.test.ts` |
 | Slides API client + `isPickAnswerSlide` | `src/api/slides.test.ts` |
 | LessonPlay playback logic (pure) | `src/views/LessonPlay.test.ts` |

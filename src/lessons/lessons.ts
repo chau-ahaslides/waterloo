@@ -2,31 +2,47 @@
 //
 // There is no backend lessons API yet, so lessons are persisted in
 // localStorage under a namespaced key. A lesson is derived from ONE
-// presentation and (for now) contains only its "pick answer" slides
-// (multiple-choice quiz slides). See src/api/slides.ts for how the slide
-// content is fetched and which slides qualify.
+// presentation: every slide whose presenter shape is claimed by a registered
+// slide-type module becomes a lesson slide; everything else is skipped.
+//
+// Conversion + the lesson-slide shapes themselves live in the pluggable
+// slide-type registry (src/slide-types/). This module is GENERIC — it never
+// references a concrete slide type. To support a new presenter slide type,
+// register a module in src/slide-types/registry.ts; nothing here changes.
 
-import {
-  fetchPickAnswerSlides,
-  type RawSlide,
-  type RawSlideOption,
-} from '@/api/slides'
+import { fetchPresentationSlides } from '@/api/slides'
+import { convertRawSlide } from '@/slide-types/registry'
+import type { BaseLessonSlide } from '@/slide-types/types'
+import type {
+  PickAnswerLessonSlide,
+  PickAnswerOption,
+} from '@/slide-types/pickAnswer/module'
+import type { InfoLessonSlide } from '@/slide-types/infoSlide/module'
+
+// Re-export the concrete slide-type shapes so existing imports keep working.
+export type { PickAnswerLessonSlide, PickAnswerOption, InfoLessonSlide }
 
 const STORAGE_KEY = 'waterloo.lessons'
 
-/** One answer option of a lesson slide. */
+/**
+ * A lesson slide of any registered type — a discriminated union over the
+ * concrete per-type shapes. New slide types add a member here (one line); the
+ * `BaseLessonSlide` fallback keeps deserialised unknown types representable.
+ */
+export type LessonSlide =
+  | PickAnswerLessonSlide
+  | InfoLessonSlide
+  | BaseLessonSlide
+
+/**
+ * @deprecated kept for back-compat. A pick-answer option. Prefer importing
+ * `PickAnswerOption` from the slide-type module.
+ */
 export interface LessonOption {
   id: number
   text: string
   isCorrect: boolean
   image?: string | null
-}
-
-/** One "pick answer" slide captured into a lesson. */
-export interface LessonSlide {
-  id: number
-  question: string
-  options: LessonOption[]
 }
 
 /** A lesson derived from a single presentation. */
@@ -78,39 +94,28 @@ function newLessonId(): string {
   return `lesson_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-/** Map a raw "pick answer" slide into a lesson slide. */
-function toLessonSlide(slide: RawSlide): LessonSlide {
-  const options = (slide.SlideOptions ?? []).map(
-    (o: RawSlideOption): LessonOption => ({
-      id: o.id,
-      text: (o.title ?? '').trim(),
-      isCorrect: Boolean(o.correct),
-      image: o.image ?? null,
-    }),
-  )
-  return {
-    id: slide.id,
-    question: (slide.title ?? '').trim() || 'Untitled question',
-    options,
-  }
-}
-
 /**
- * Convert ONE presentation into ONE lesson, pulling only its "pick answer"
- * slides. Returns null if the presentation has no pick-answer slides (so the
- * caller can skip empty conversions and report them).
+ * Convert ONE presentation into ONE lesson. Fetches all slides in display
+ * order, runs each through the slide-type registry, and keeps the ones a
+ * registered module claims (pick-answer, info, …). Unsupported slides are
+ * skipped. Returns null if NO slide converts (so the caller can report it).
  */
 export async function convertPresentationToLesson(
   presentationId: number,
   presentationName: string,
 ): Promise<Lesson | null> {
-  const slides = await fetchPickAnswerSlides(presentationId)
+  const raw = await fetchPresentationSlides(presentationId)
+  const ordered = [...raw].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  const slides = ordered
+    .map((s) => convertRawSlide(s))
+    .filter((s): s is LessonSlide => s !== null)
+
   if (!slides.length) return null
   return {
     id: newLessonId(),
     presentationId,
     title: presentationName?.trim() || `Presentation ${presentationId}`,
     createdAt: new Date().toISOString(),
-    slides: slides.map(toLessonSlide),
+    slides,
   }
 }

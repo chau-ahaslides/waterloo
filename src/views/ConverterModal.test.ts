@@ -53,7 +53,7 @@ function makeLesson(id: number): Lesson {
     presentationId: id,
     title: `Deck ${id}`,
     createdAt: '2026-06-01T00:00:00Z',
-    slides: [{ id: 1, question: 'Q', options: [{ id: 1, text: 'A', isCorrect: true }] }],
+    slides: [{ id: 1, type: 'pickAnswer', question: 'Q', options: [{ id: 1, text: 'A', isCorrect: true }] }],
   }
 }
 

@@ -144,7 +144,7 @@ async function confirm() {
   if (created.length)
     parts.push(`${created.length} lesson${created.length === 1 ? '' : 's'} created`)
   if (skipped.length)
-    parts.push(`${skipped.length} skipped (no pick-answer slides)`)
+    parts.push(`${skipped.length} skipped (no supported slides)`)
   if (failed.length) parts.push(`${failed.length} failed`)
 
   if (created.length && !skipped.length && !failed.length) {
@@ -169,7 +169,8 @@ async function confirm() {
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <p class="m-0 text-sm text-aha-indigo">
         Pick one or more presentations. Each becomes a lesson built from its
-        <span class="font-semibold text-aha-space">pick-answer</span> slides.
+        <span class="font-semibold text-aha-space">supported</span> slides
+        (quiz questions and content slides).
       </p>
       <div class="flex shrink-0 items-center gap-2">
         <a-select

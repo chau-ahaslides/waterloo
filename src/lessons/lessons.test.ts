@@ -9,6 +9,8 @@ import {
 } from './lessons'
 import * as slidesApi from '@/api/slides'
 import type { RawSlide } from '@/api/slides'
+import type { PickAnswerLessonSlide } from '@/slide-types/pickAnswer/module'
+import type { InfoLessonSlide } from '@/slide-types/infoSlide/module'
 
 // ---------------------------------------------------------------------------
 // localStorage stub — jsdom provides one but reset it between tests
@@ -107,6 +109,11 @@ describe('deleteLesson', () => {
 
 // ---------------------------------------------------------------------------
 // convertPresentationToLesson — unit (fetch mocked via vi.spyOn)
+//
+// The converter is now GENERIC: it fetches ALL presentation slides and runs
+// each through the slide-type registry. We mock fetchPresentationSlides and
+// assert the registry routes pick-answer + info (freestyle) slides correctly
+// and skips unsupported slides.
 // ---------------------------------------------------------------------------
 describe('convertPresentationToLesson', () => {
   const pickAnswerSlide: RawSlide = {
@@ -114,36 +121,59 @@ describe('convertPresentationToLesson', () => {
     type: 'pickAnswer',
     slideType: null,
     title: 'What is 2+2?',
-    order: 1,
+    order: 2,
     SlideOptions: [
       { id: 10, title: '3', correct: false, order: 1 },
       { id: 11, title: '4', correct: true, order: 2 },
     ],
   }
+  const infoSlide: RawSlide = {
+    id: 2,
+    type: 'freestyle',
+    slideType: null,
+    title: 'Historic Landmarks',
+    order: 1,
+  }
+  const unsupportedSlide: RawSlide = {
+    id: 3,
+    type: 'wordCloud',
+    slideType: null,
+    title: 'Ignore me',
+    order: 3,
+  }
 
-  it('returns null when there are no pick-answer slides', async () => {
-    vi.spyOn(slidesApi, 'fetchPickAnswerSlides').mockResolvedValueOnce([])
+  it('returns null when no slide converts (all unsupported)', async () => {
+    vi.spyOn(slidesApi, 'fetchPresentationSlides').mockResolvedValueOnce([unsupportedSlide])
     const result = await convertPresentationToLesson(99, 'Empty Pres')
     expect(result).toBeNull()
   })
 
-  it('converts slides into a Lesson with correct structure', async () => {
-    vi.spyOn(slidesApi, 'fetchPickAnswerSlides').mockResolvedValueOnce([pickAnswerSlide])
+  it('converts supported slides into a Lesson, in display order, skipping the rest', async () => {
+    vi.spyOn(slidesApi, 'fetchPresentationSlides').mockResolvedValueOnce([
+      pickAnswerSlide,
+      infoSlide,
+      unsupportedSlide,
+    ])
     const lesson = await convertPresentationToLesson(42, 'My Quiz')
     expect(lesson).not.toBeNull()
     expect(lesson!.presentationId).toBe(42)
     expect(lesson!.title).toBe('My Quiz')
-    expect(lesson!.slides).toHaveLength(1)
-    const slide = lesson!.slides[0]
-    expect(slide.question).toBe('What is 2+2?')
-    expect(slide.options).toHaveLength(2)
-    expect(slide.options.find((o) => o.isCorrect)?.text).toBe('4')
+    // info (order 1) then pick-answer (order 2); unsupported skipped.
+    expect(lesson!.slides.map((s) => s.type)).toEqual(['infoSlide', 'pickAnswer'])
+
+    const info = lesson!.slides[0] as unknown as InfoLessonSlide
+    expect(info.title).toBe('Historic Landmarks')
+
+    const pa = lesson!.slides[1] as unknown as PickAnswerLessonSlide
+    expect(pa.question).toBe('What is 2+2?')
+    expect(pa.options).toHaveLength(2)
+    expect(pa.options.find((o) => o.isCorrect)?.text).toBe('4')
   })
 
-  it('falls back to "Untitled question" when slide title is empty', async () => {
+  it('falls back to "Untitled question" when a pick-answer slide title is empty', async () => {
     const noTitle: RawSlide = { ...pickAnswerSlide, title: '' }
-    vi.spyOn(slidesApi, 'fetchPickAnswerSlides').mockResolvedValueOnce([noTitle])
+    vi.spyOn(slidesApi, 'fetchPresentationSlides').mockResolvedValueOnce([noTitle])
     const lesson = await convertPresentationToLesson(42, 'Pres')
-    expect(lesson!.slides[0].question).toBe('Untitled question')
+    expect((lesson!.slides[0] as unknown as PickAnswerLessonSlide).question).toBe('Untitled question')
   })
 })

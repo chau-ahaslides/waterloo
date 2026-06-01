@@ -6,19 +6,20 @@
 // what the component does.
 
 import { describe, it, expect } from 'vitest'
-import type { LessonOption, LessonSlide, Lesson } from '@/lessons/lessons'
+import type { Lesson } from '@/lessons/lessons'
+import type { PickAnswerOption, PickAnswerLessonSlide } from '@/slide-types/pickAnswer/module'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-function makeOption(id: number, isCorrect: boolean, text = `Option ${id}`): LessonOption {
+function makeOption(id: number, isCorrect: boolean, text = `Option ${id}`): PickAnswerOption {
   return { id, text, isCorrect }
 }
 
-function makeSlide(id: number, options: LessonOption[]): LessonSlide {
-  return { id, question: `Question ${id}?`, options }
+function makeSlide(id: number, options: PickAnswerOption[]): PickAnswerLessonSlide {
+  return { id, type: 'pickAnswer', question: `Question ${id}?`, options }
 }
 
-function makeLesson(slides: LessonSlide[]): Lesson {
+function makeLesson(slides: PickAnswerLessonSlide[]): Lesson {
   return {
     id: 'lesson_test',
     presentationId: 1,
@@ -58,7 +59,7 @@ function selectOption(
     showingFeedback: boolean
     score: number
   },
-  opt: LessonOption,
+  opt: PickAnswerOption,
 ): typeof state {
   if (state.showingFeedback || state.selectedOptionId !== null) return state
   return {
@@ -193,7 +194,7 @@ describe('LessonPlay — lesson model', () => {
     const slides = [makeSlide(1, [makeOption(1, true)]), makeSlide(2, [makeOption(2, false)])]
     const lesson = makeLesson(slides)
     expect(lesson.slides).toHaveLength(2)
-    expect(lesson.slides[0].question).toBe('Question 1?')
+    expect((lesson.slides[0] as PickAnswerLessonSlide).question).toBe('Question 1?')
   })
 
   it('an empty lesson has 0 slides', () => {

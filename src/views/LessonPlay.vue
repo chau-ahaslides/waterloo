@@ -1,20 +1,23 @@
 <script setup lang="ts">
-// LessonPlay.vue — audience/learner view for a single lesson.
+// LessonPlay.vue — GENERIC audience/learner view for a single lesson.
 //
-// Shows pick-answer questions one at a time. When the learner selects an
-// option the UI flashes correct/incorrect feedback for ~800 ms, then
-// auto-advances to the next question. After the last question a completion
-// screen is shown with the final score.
+// It is slide-type-agnostic: for each lesson slide it renders the registered
+// slide-type's component (via the registry) and wires the contract events:
+//   - response types  → component emits `answered` → tally score, show brief
+//                        feedback, then auto-advance after 800ms.
+//   - info-only types  → component emits `continue` → advance immediately.
+// It keeps the progress bar, score (counts ONLY response-bearing slides) and
+// completion screen. Adding a new slide type needs NO change here.
 
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ArrowLeftOutlined, CloseCircleFilled, TrophyOutlined } from '@ant-design/icons-vue'
+import { loadLessons, type Lesson, type LessonSlide } from '@/lessons/lessons'
 import {
-  ArrowLeftOutlined,
-  CheckCircleFilled,
-  CloseCircleFilled,
-  TrophyOutlined,
-} from '@ant-design/icons-vue'
-import { loadLessons, type LessonSlide, type LessonOption } from '@/lessons/lessons'
+  getSlideComponent,
+  scoreForSlide,
+  typeHasResponse,
+} from '@/slide-types/registry'
 
 // ── Route params ──────────────────────────────────────────────────────────────
 const route = useRoute()
@@ -22,18 +25,18 @@ const router = useRouter()
 const lessonId = route.params.id as string
 
 // ── Load lesson ───────────────────────────────────────────────────────────────
-const lesson = loadLessons().find((l) => l.id === lessonId) ?? null
+const lesson = loadLessons().find((l: Lesson) => l.id === lessonId) ?? null
 
 // ── Playback state ────────────────────────────────────────────────────────────
-/** Index of the currently displayed question. */
+/** Index of the currently displayed slide. */
 const currentIndex = ref(0)
-/** Id of the option the learner selected for the current question (null = not yet answered). */
-const selectedOptionId = ref<number | null>(null)
-/** Whether the feedback phase is active (auto-advance pending). */
+/** The captured response for the current slide (module-defined; null = pending). */
+const currentResponse = ref<unknown>(null)
+/** Whether the feedback phase is active (auto-advance pending) for a response slide. */
 const showingFeedback = ref(false)
-/** Whether all questions have been answered and we're on the completion screen. */
+/** Whether we've reached the completion screen. */
 const completed = ref(false)
-/** Cumulative score. */
+/** Cumulative score (response-bearing slides only). */
 const score = ref(0)
 
 const ADVANCE_DELAY_MS = 800
@@ -43,49 +46,60 @@ const currentSlide = computed<LessonSlide | null>(() => {
   return lesson.slides[currentIndex.value] ?? null
 })
 
-const totalQuestions = computed(() => lesson?.slides.length ?? 0)
-/** 1-based display number for the current question. */
-const questionNumber = computed(() => currentIndex.value + 1)
-
-/** Progress percentage (0-100) based on questions answered so far. */
-const progressPercent = computed(() =>
-  totalQuestions.value ? Math.round((currentIndex.value / totalQuestions.value) * 100) : 0,
+/** The registered component that renders the current slide. */
+const currentComponent = computed(() =>
+  currentSlide.value ? getSlideComponent(currentSlide.value.type) : undefined,
 )
 
-function isCorrectOption(opt: LessonOption): boolean {
-  return opt.isCorrect
-}
+const totalSlides = computed(() => lesson?.slides.length ?? 0)
+/** 1-based display number for the current slide. */
+const slideNumber = computed(() => currentIndex.value + 1)
 
-function isSelectedOption(opt: LessonOption): boolean {
-  return selectedOptionId.value === opt.id
-}
+/** Number of response-bearing (scored) slides — the score denominator. */
+const totalScored = computed(
+  () => lesson?.slides.filter((s) => typeHasResponse(s.type)).length ?? 0,
+)
+/** Scored slides answered so far (before the current index). */
+const scoredAnswered = computed(
+  () =>
+    lesson?.slides
+      .slice(0, currentIndex.value)
+      .filter((s) => typeHasResponse(s.type)).length ?? 0,
+)
+
+/** Progress percentage (0-100) based on slides advanced past so far. */
+const progressPercent = computed(() =>
+  totalSlides.value ? Math.round((currentIndex.value / totalSlides.value) * 100) : 0,
+)
 
 /**
- * Called when the learner taps an answer option.
- * - Locks the selection, tallies the score, shows brief feedback, then advances.
+ * Response slide answered: tally score via the module, show feedback, then
+ * auto-advance. `response` is whatever the slide-type component emitted.
  */
-function selectOption(opt: LessonOption) {
-  if (showingFeedback.value || selectedOptionId.value !== null) return
+function onAnswered(response: unknown) {
+  if (showingFeedback.value || currentResponse.value !== null) return
+  const slide = currentSlide.value
+  if (!slide) return
 
-  selectedOptionId.value = opt.id
+  currentResponse.value = response
   showingFeedback.value = true
+  score.value += scoreForSlide(slide, response)
 
-  if (opt.isCorrect) {
-    score.value += 1
-  }
+  setTimeout(advance, ADVANCE_DELAY_MS)
+}
 
-  setTimeout(() => {
-    advance()
-  }, ADVANCE_DELAY_MS)
+/** Info-only slide done: advance immediately (no score, no feedback delay). */
+function onContinue() {
+  advance()
 }
 
 function advance() {
   const nextIndex = currentIndex.value + 1
-  if (nextIndex >= totalQuestions.value) {
+  if (nextIndex >= totalSlides.value) {
     completed.value = true
   } else {
     currentIndex.value = nextIndex
-    selectedOptionId.value = null
+    currentResponse.value = null
     showingFeedback.value = false
   }
 }
@@ -96,35 +110,10 @@ function goHome() {
 
 function restart() {
   currentIndex.value = 0
-  selectedOptionId.value = null
+  currentResponse.value = null
   showingFeedback.value = false
   completed.value = false
   score.value = 0
-}
-
-/** CSS classes for an option button, reflecting feedback state. */
-function optionClass(opt: LessonOption): string {
-  const base =
-    'w-full rounded-aha border-2 px-5 py-4 text-left text-base font-semibold transition-all duration-200 focus:outline-none'
-
-  if (!showingFeedback.value) {
-    // Pre-answer: default neutral state.
-    return `${base} border-aha-indigo/20 bg-white text-aha-space hover:border-aha-purple hover:bg-aha-lavender/20 hover:shadow-aha-sm active:scale-[0.98]`
-  }
-
-  const chosen = isSelectedOption(opt)
-  const correct = isCorrectOption(opt)
-
-  if (correct) {
-    // Always highlight the correct answer in teal.
-    return `${base} border-aha-teal bg-aha-teal/10 text-aha-space`
-  }
-  if (chosen && !correct) {
-    // The wrong choice: highlight in carmine.
-    return `${base} border-aha-carmine bg-aha-carmine/10 text-aha-carmine`
-  }
-  // Unchosen, wrong: dim out.
-  return `${base} border-aha-indigo/10 bg-gray-50 text-aha-indigo opacity-60`
 }
 </script>
 
@@ -147,7 +136,7 @@ function optionClass(opt: LessonOption): string {
 
   <!-- ── Empty lesson ───────────────────────────────────────────────────────── -->
   <main
-    v-else-if="totalQuestions === 0"
+    v-else-if="totalSlides === 0"
     class="flex min-h-[100dvh] w-full flex-col items-center justify-center gap-6 bg-aha-blush px-6 text-center"
   >
     <div class="flex h-20 w-20 items-center justify-center rounded-full bg-aha-lavender text-4xl text-aha-purple">
@@ -155,7 +144,7 @@ function optionClass(opt: LessonOption): string {
     </div>
     <h1 class="text-2xl font-extrabold text-aha-space">Nothing to preview</h1>
     <p class="text-aha-indigo">
-      This lesson has no quiz questions yet. Convert a presentation with pick-answer slides first.
+      This lesson has no slides yet. Convert a presentation with supported slides first.
     </p>
     <a-button type="primary" @click="goHome">
       <template #icon><ArrowLeftOutlined /></template>
@@ -172,13 +161,14 @@ function optionClass(opt: LessonOption): string {
       <TrophyOutlined />
     </div>
     <h1 class="text-3xl font-extrabold text-aha-space">
-      {{ score === totalQuestions ? '🎉 Perfect!' : 'Lesson complete!' }}
+      {{ totalScored > 0 && score === totalScored ? '🎉 Perfect!' : 'Lesson complete!' }}
     </h1>
-    <p class="text-xl text-aha-indigo">
+    <p v-if="totalScored > 0" class="text-xl text-aha-indigo">
       You got
-      <span class="font-extrabold text-aha-purple">{{ score }}/{{ totalQuestions }}</span>
+      <span class="font-extrabold text-aha-purple">{{ score }}/{{ totalScored }}</span>
       correct
     </p>
+    <p v-else class="text-xl text-aha-indigo">You've reached the end.</p>
     <div class="flex items-center gap-3">
       <a-button @click="restart">Try again</a-button>
       <a-button type="primary" @click="goHome">
@@ -188,11 +178,8 @@ function optionClass(opt: LessonOption): string {
     </div>
   </main>
 
-  <!-- ── Active quiz ────────────────────────────────────────────────────────── -->
-  <main
-    v-else
-    class="flex min-h-[100dvh] w-full flex-col bg-aha-blush"
-  >
+  <!-- ── Active lesson ──────────────────────────────────────────────────────── -->
+  <main v-else class="flex min-h-[100dvh] w-full flex-col bg-aha-blush">
     <!-- Top bar -->
     <header class="flex w-full items-center gap-4 border-b border-aha-indigo/10 bg-white px-6 py-4 shadow-aha-sm">
       <a-button type="text" size="small" class="shrink-0" @click="goHome">
@@ -202,13 +189,14 @@ function optionClass(opt: LessonOption): string {
         <p class="truncate text-sm font-semibold text-aha-space" :title="lesson.title">
           {{ lesson.title }}
         </p>
-        <p class="text-xs text-aha-indigo">
-          Q {{ questionNumber }} / {{ totalQuestions }}
-        </p>
+        <p class="text-xs text-aha-indigo">{{ slideNumber }} / {{ totalSlides }}</p>
       </div>
-      <!-- Score badge -->
-      <span class="shrink-0 rounded-full bg-aha-purple px-3 py-1 text-xs font-bold text-white">
-        {{ score }} / {{ questionNumber - 1 }} correct
+      <!-- Score badge (only when the lesson has scored slides) -->
+      <span
+        v-if="totalScored > 0"
+        class="shrink-0 rounded-full bg-aha-purple px-3 py-1 text-xs font-bold text-white"
+      >
+        {{ score }} / {{ scoredAnswered }} correct
       </span>
     </header>
 
@@ -222,79 +210,23 @@ function optionClass(opt: LessonOption): string {
       :stroke-width="6"
     />
 
-    <!-- Question + options -->
+    <!-- Slide body: render the registered slide-type component for this slide. -->
     <div class="mx-auto w-full max-w-2xl flex-1 px-6 py-10">
-      <!-- Feedback banner -->
-      <transition name="fade">
-        <div
-          v-if="showingFeedback && selectedOptionId !== null"
-          class="mb-6 flex items-center gap-2 rounded-aha px-5 py-3 text-sm font-semibold"
-          :class="
-            currentSlide?.options.find((o) => o.id === selectedOptionId)?.isCorrect
-              ? 'bg-aha-teal/15 text-aha-space'
-              : 'bg-aha-carmine/10 text-aha-carmine'
-          "
-        >
-          <CheckCircleFilled
-            v-if="currentSlide?.options.find((o) => o.id === selectedOptionId)?.isCorrect"
-            class="text-aha-teal"
-          />
-          <CloseCircleFilled v-else class="text-aha-carmine" />
-          <span>
-            {{
-              currentSlide?.options.find((o) => o.id === selectedOptionId)?.isCorrect
-                ? 'Correct!'
-                : 'Not quite — see the correct answer highlighted'
-            }}
-          </span>
-        </div>
-      </transition>
-
-      <!-- Question text -->
-      <h2 class="mb-8 text-xl font-extrabold leading-snug text-aha-space sm:text-2xl">
-        {{ currentSlide?.question }}
-      </h2>
-
-      <!-- Answer options -->
-      <div class="flex flex-col gap-3">
-        <button
-          v-for="opt in currentSlide?.options"
-          :key="opt.id"
-          :class="optionClass(opt)"
-          :disabled="showingFeedback"
-          @click="selectOption(opt)"
-        >
-          <span class="flex items-center gap-3">
-            <!-- Icon shown after answer -->
-            <CheckCircleFilled
-              v-if="showingFeedback && opt.isCorrect"
-              class="shrink-0 text-aha-teal"
-            />
-            <CloseCircleFilled
-              v-else-if="showingFeedback && isSelectedOption(opt) && !opt.isCorrect"
-              class="shrink-0 text-aha-carmine"
-            />
-            <span
-              v-else
-              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-aha-indigo/30 text-xs font-bold text-aha-indigo"
-            >
-              {{ String.fromCharCode(65 + (currentSlide?.options.indexOf(opt) ?? 0)) }}
-            </span>
-            {{ opt.text || '(no text)' }}
-          </span>
-        </button>
+      <component
+        :is="currentComponent"
+        v-if="currentComponent && currentSlide"
+        :key="currentSlide.id"
+        :slide="currentSlide"
+        :showing-feedback="showingFeedback"
+        :response="currentResponse"
+        @answered="onAnswered"
+        @continue="onContinue"
+      />
+      <!-- Fallback: an unregistered slide type (defensive — should not occur). -->
+      <div v-else class="text-center text-aha-indigo">
+        <p class="mb-6">This slide type can't be previewed yet.</p>
+        <a-button type="primary" @click="advance">Continue</a-button>
       </div>
     </div>
   </main>
 </template>
-
-<style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-</style>

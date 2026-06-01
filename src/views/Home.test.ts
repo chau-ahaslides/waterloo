@@ -40,8 +40,8 @@ function makeLesson(over: Partial<Lesson> = {}): Lesson {
     title: 'Cell Biology Basics',
     createdAt: '2026-05-20T09:00:00Z',
     slides: [
-      { id: 1, question: 'Q1', options: [{ id: 1, text: 'A', isCorrect: true }] },
-      { id: 2, question: 'Q2', options: [{ id: 2, text: 'B', isCorrect: false }] },
+      { id: 1, type: 'pickAnswer', question: 'Q1', options: [{ id: 1, text: 'A', isCorrect: true }] },
+      { id: 2, type: 'pickAnswer', question: 'Q2', options: [{ id: 2, text: 'B', isCorrect: false }] },
     ],
     ...over,
   }
@@ -91,7 +91,7 @@ describe('Home.vue', () => {
         id: 'l2',
         title: 'World Capitals',
         presentationId: 7,
-        slides: [{ id: 9, question: 'Q', options: [] }],
+        slides: [{ id: 9, type: 'pickAnswer', question: 'Q', options: [] }],
       }),
     ])
     const wrapper = mountHome()
