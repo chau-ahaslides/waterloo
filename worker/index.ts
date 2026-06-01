@@ -27,8 +27,11 @@
 
 import {
   ConvertError,
+  MIN_QUESTIONS,
   buildAndSaveLesson,
   fetchPresentationDetail,
+  regenerateLessonAll,
+  regenerateOneQuestion,
   resolvePresenterToken,
   runWorkersAi,
 } from './lessons-convert'
@@ -457,6 +460,402 @@ async function listNormalizedLessons(env: Env): Promise<Response> {
   return json({ lessons })
 }
 
+// ── Lesson detail / editor (WAT-11) ──────────────────────────────────────────
+//
+// The trainer reviews + edits an AI-converted lesson before publishing. The
+// lesson is the NORMALIZED model: one `lessons` row + interleaved
+// `lesson_slides` rows (Q1,E1,…,Qn,En). All routes below operate on that model.
+//
+//   GET   /api/courses/lessons/:id                         → lesson + slides
+//   PATCH /api/courses/lessons/:id                         → save title/duration/slides
+//   POST  /api/courses/lessons/:id/reorder                 → reorder Q+E pairs
+//   DELETE/api/courses/lessons/:id/questions/:order        → delete a Q+E pair (min 3)
+//   POST  /api/courses/lessons/:id/questions/:order/regenerate → regen one Q+E
+//   POST  /api/courses/lessons/:id/regenerate              → regen the whole lesson
+//   POST  /api/courses/lessons/:id/reviewed                → mark reviewed=1
+
+/** Minimum questions a lesson must keep (mirrors the convert pipeline floor). */
+const MIN_LESSON_QUESTIONS = MIN_QUESTIONS
+
+interface LessonSlideRow {
+  id: string
+  lesson_id: string
+  order: number
+  type: string
+  content: string
+}
+
+interface DetailLessonRow {
+  id: string
+  title: string
+  status: string
+  source_presentation_id: number | null
+  estimated_duration_minutes: number | null
+  language: string | null
+  reviewed: number | null
+  created_at: string
+  updated_at: string
+}
+
+function parseContent(raw: string): Record<string, unknown> {
+  try {
+    const v = JSON.parse(raw)
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Load a normalized lesson + its ordered slides; null if the lesson is absent. */
+async function loadLessonDetail(
+  env: Env,
+  id: string,
+): Promise<{ lesson: DetailLessonRow; slides: LessonSlideRow[] } | null> {
+  const lesson = await env.DB.prepare(
+    `SELECT id, title, status, source_presentation_id,
+            estimated_duration_minutes, language, reviewed, created_at, updated_at
+       FROM lessons WHERE id = ?`,
+  )
+    .bind(id)
+    .first<DetailLessonRow>()
+  if (!lesson) return null
+
+  const { results } = await env.DB.prepare(
+    `SELECT id, lesson_id, "order", type, content
+       FROM lesson_slides WHERE lesson_id = ? ORDER BY "order" ASC`,
+  )
+    .bind(id)
+    .all<LessonSlideRow>()
+  return { lesson, slides: results ?? [] }
+}
+
+/** Serialize a lesson + slides into the API shape. */
+function lessonDetailBody(lesson: DetailLessonRow, slides: LessonSlideRow[]) {
+  return {
+    lesson: {
+      id: lesson.id,
+      title: lesson.title,
+      status: lesson.status === 'published' ? 'published' : 'draft',
+      sourcePresentationId: lesson.source_presentation_id,
+      estimatedDurationMinutes: lesson.estimated_duration_minutes,
+      language: lesson.language,
+      reviewed: !!lesson.reviewed,
+      createdAt: lesson.created_at,
+      updatedAt: lesson.updated_at,
+    },
+    slides: slides.map((s) => ({
+      id: s.id,
+      order: s.order,
+      type: s.type === 'question' ? 'question' : 'explanation',
+      content: parseContent(s.content),
+    })),
+  }
+}
+
+/** GET /api/courses/lessons/:id — normalized lesson + ordered slides. */
+async function getLessonDetail(env: Env, id: string): Promise<Response> {
+  const data = await loadLessonDetail(env, id)
+  if (!data) return json({ error: 'Lesson not found' }, 404)
+  return json(lessonDetailBody(data.lesson, data.slides))
+}
+
+/** Count question-type slides for a lesson. */
+async function countQuestions(env: Env, lessonId: string): Promise<number> {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM lesson_slides WHERE lesson_id = ? AND type = 'question'`,
+  )
+    .bind(lessonId)
+    .first<{ n: number }>()
+  return row?.n ?? 0
+}
+
+/**
+ * PATCH /api/courses/lessons/:id — save edits. Body may contain:
+ *   - title?: string
+ *   - estimatedDurationMinutes?: number | null
+ *   - slides?: Array<{ id, content }>  → updates each slide's content blob.
+ * Slides edits update content only (in place); structural changes (reorder /
+ * delete) have their own routes. Bumps updated_at.
+ */
+async function saveLessonDetail(env: Env, id: string, request: Request): Promise<Response> {
+  const data = await loadLessonDetail(env, id)
+  if (!data) return json({ error: 'Lesson not found' }, 404)
+
+  let body: Record<string, unknown>
+  try {
+    body = (await request.json()) as Record<string, unknown>
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400)
+  }
+
+  const now = new Date().toISOString()
+  const statements: D1PreparedStatement[] = []
+
+  // Title + duration on the lessons row (only when provided).
+  const sets: string[] = []
+  const binds: unknown[] = []
+  if (typeof body.title === 'string') {
+    sets.push('title = ?')
+    binds.push(body.title.slice(0, 300))
+  }
+  if ('estimatedDurationMinutes' in body) {
+    const v = body.estimatedDurationMinutes
+    const minutes =
+      typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null
+    sets.push('estimated_duration_minutes = ?')
+    binds.push(minutes)
+  }
+  sets.push('updated_at = ?')
+  binds.push(now)
+  binds.push(id)
+  statements.push(
+    env.DB.prepare(`UPDATE lessons SET ${sets.join(', ')} WHERE id = ?`).bind(...binds),
+  )
+
+  // Per-slide content updates (match by slide id, scoped to this lesson).
+  if (Array.isArray(body.slides)) {
+    const validIds = new Set(data.slides.map((s) => s.id))
+    for (const raw of body.slides) {
+      if (!raw || typeof raw !== 'object') continue
+      const s = raw as Record<string, unknown>
+      if (typeof s.id !== 'string' || !validIds.has(s.id)) continue
+      if (!s.content || typeof s.content !== 'object') continue
+      statements.push(
+        env.DB.prepare(
+          `UPDATE lesson_slides SET content = ? WHERE id = ? AND lesson_id = ?`,
+        ).bind(JSON.stringify(s.content), s.id, id),
+      )
+    }
+  }
+
+  await env.DB.batch(statements)
+  return getLessonDetail(env, id)
+}
+
+/**
+ * POST /api/courses/lessons/:id/reorder — body: { order: string[] } where each
+ * entry is a QUESTION slide id in the desired new sequence. The paired
+ * explanation moves with its question; `order` is renumbered Q,E,Q,E,…
+ * Returns the updated lesson detail.
+ */
+async function reorderLesson(env: Env, id: string, request: Request): Promise<Response> {
+  const data = await loadLessonDetail(env, id)
+  if (!data) return json({ error: 'Lesson not found' }, 404)
+
+  let body: Record<string, unknown>
+  try {
+    body = (await request.json()) as Record<string, unknown>
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400)
+  }
+  const requested = Array.isArray(body.order)
+    ? body.order.filter((x): x is string => typeof x === 'string')
+    : null
+  if (!requested) return json({ error: 'Missing order[] of question slide ids' }, 400)
+
+  // Build Q→E pairs by current order: each question is immediately followed by
+  // its explanation. Pair them positionally.
+  const pairs: { q: LessonSlideRow; e: LessonSlideRow | null }[] = []
+  for (let i = 0; i < data.slides.length; i++) {
+    const s = data.slides[i]
+    if (s.type === 'question') {
+      const next = data.slides[i + 1]
+      pairs.push({ q: s, e: next && next.type === 'explanation' ? next : null })
+    }
+  }
+  const byQId = new Map(pairs.map((p) => [p.q.id, p]))
+
+  // The requested order must be a permutation of the existing question ids.
+  if (
+    requested.length !== pairs.length ||
+    !requested.every((qid) => byQId.has(qid)) ||
+    new Set(requested).size !== requested.length
+  ) {
+    return json({ error: 'order[] must be a permutation of the lesson question ids' }, 400)
+  }
+
+  const statements: D1PreparedStatement[] = []
+  let order = 0
+  for (const qid of requested) {
+    const p = byQId.get(qid)!
+    statements.push(
+      env.DB.prepare(`UPDATE lesson_slides SET "order" = ? WHERE id = ?`).bind(order++, p.q.id),
+    )
+    if (p.e) {
+      statements.push(
+        env.DB.prepare(`UPDATE lesson_slides SET "order" = ? WHERE id = ?`).bind(order++, p.e.id),
+      )
+    }
+  }
+  statements.push(
+    env.DB.prepare(`UPDATE lessons SET updated_at = ? WHERE id = ?`).bind(
+      new Date().toISOString(),
+      id,
+    ),
+  )
+  await env.DB.batch(statements)
+  return getLessonDetail(env, id)
+}
+
+/**
+ * DELETE /api/courses/lessons/:id/questions/:order — delete the question at
+ * `order` together with its paired explanation, then renumber. Enforces the
+ * min-3-questions floor (server-side guard mirrors the client). 409 if at floor.
+ */
+async function deleteQuestionPair(env: Env, id: string, order: number): Promise<Response> {
+  const data = await loadLessonDetail(env, id)
+  if (!data) return json({ error: 'Lesson not found' }, 404)
+
+  const qCount = data.slides.filter((s) => s.type === 'question').length
+  if (qCount <= MIN_LESSON_QUESTIONS) {
+    return json(
+      {
+        error: `A lesson must keep at least ${MIN_LESSON_QUESTIONS} questions. Delete is blocked.`,
+      },
+      409,
+    )
+  }
+
+  const idx = data.slides.findIndex((s) => s.order === order && s.type === 'question')
+  if (idx === -1) return json({ error: 'No question slide at that order' }, 404)
+
+  const q = data.slides[idx]
+  const next = data.slides[idx + 1]
+  const removeIds = [q.id]
+  if (next && next.type === 'explanation') removeIds.push(next.id)
+
+  const statements: D1PreparedStatement[] = []
+  for (const rid of removeIds) {
+    statements.push(
+      env.DB.prepare(`DELETE FROM lesson_slides WHERE id = ? AND lesson_id = ?`).bind(rid, id),
+    )
+  }
+  // Renumber the survivors contiguously, preserving order.
+  const survivors = data.slides.filter((s) => !removeIds.includes(s.id))
+  let newOrder = 0
+  for (const s of survivors) {
+    statements.push(
+      env.DB.prepare(`UPDATE lesson_slides SET "order" = ? WHERE id = ?`).bind(newOrder++, s.id),
+    )
+  }
+  statements.push(
+    env.DB.prepare(`UPDATE lessons SET updated_at = ? WHERE id = ?`).bind(
+      new Date().toISOString(),
+      id,
+    ),
+  )
+  await env.DB.batch(statements)
+  return getLessonDetail(env, id)
+}
+
+/** Build the convert deps from the request (presenter token + Workers AI). */
+function convertDepsFromRequest(env: Env, request: Request, bodyToken: unknown) {
+  const token = resolvePresenterToken(request.headers.get('authorization'), bodyToken)
+  return {
+    token,
+    deps: {
+      fetchSlides: fetchPresentationDetail,
+      runAi: (prompt: string) => runWorkersAi(env.AI, prompt),
+    },
+  }
+}
+
+/**
+ * POST /api/courses/lessons/:id/questions/:order/regenerate — regenerate ONE
+ * grounded Q+E from the source presentation, replacing the pair at `order`.
+ */
+async function regenerateOne(env: Env, id: string, order: number, request: Request): Promise<Response> {
+  const data = await loadLessonDetail(env, id)
+  if (!data) return json({ error: 'Lesson not found' }, 404)
+  if (data.lesson.source_presentation_id == null) {
+    return json({ error: 'Lesson has no source presentation to regenerate from.' }, 422)
+  }
+
+  const idx = data.slides.findIndex((s) => s.order === order && s.type === 'question')
+  if (idx === -1) return json({ error: 'No question slide at that order' }, 404)
+  const qSlide = data.slides[idx]
+  const eSlide = data.slides[idx + 1]?.type === 'explanation' ? data.slides[idx + 1] : null
+
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await request.json()) as Record<string, unknown>
+  } catch {
+    body = {}
+  }
+
+  const { token, deps } = convertDepsFromRequest(env, request, body.token)
+  try {
+    const q = await regenerateOneQuestion(deps, String(data.lesson.source_presentation_id), token)
+    const statements: D1PreparedStatement[] = [
+      env.DB.prepare(`UPDATE lesson_slides SET content = ? WHERE id = ?`).bind(
+        JSON.stringify({ question: q.question, options: q.options, correct_index: q.correct_index }),
+        qSlide.id,
+      ),
+    ]
+    if (eSlide) {
+      statements.push(
+        env.DB.prepare(`UPDATE lesson_slides SET content = ? WHERE id = ?`).bind(
+          JSON.stringify({ explanation: q.explanation }),
+          eSlide.id,
+        ),
+      )
+    }
+    statements.push(
+      env.DB.prepare(`UPDATE lessons SET updated_at = ? WHERE id = ?`).bind(
+        new Date().toISOString(),
+        id,
+      ),
+    )
+    await env.DB.batch(statements)
+    return getLessonDetail(env, id)
+  } catch (err) {
+    if (err instanceof ConvertError) return json({ error: err.message }, err.status)
+    return json({ error: 'Regeneration failed', detail: String((err as Error)?.message ?? err) }, 500)
+  }
+}
+
+/**
+ * POST /api/courses/lessons/:id/regenerate — regenerate the WHOLE lesson from
+ * the source presentation, replacing all slides (warns the trainer client-side
+ * that edits are lost). Returns the refreshed lesson detail.
+ */
+async function regenerateAll(env: Env, id: string, request: Request): Promise<Response> {
+  const data = await loadLessonDetail(env, id)
+  if (!data) return json({ error: 'Lesson not found' }, 404)
+  if (data.lesson.source_presentation_id == null) {
+    return json({ error: 'Lesson has no source presentation to regenerate from.' }, 422)
+  }
+
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await request.json()) as Record<string, unknown>
+  } catch {
+    body = {}
+  }
+
+  const { token, deps } = convertDepsFromRequest(env, request, body.token)
+  try {
+    await regenerateLessonAll(env.DB, deps, id, String(data.lesson.source_presentation_id), token)
+    return getLessonDetail(env, id)
+  } catch (err) {
+    if (err instanceof ConvertError) return json({ error: err.message }, err.status)
+    return json({ error: 'Regeneration failed', detail: String((err as Error)?.message ?? err) }, 500)
+  }
+}
+
+/** POST /api/courses/lessons/:id/reviewed — mark the lesson as reviewed. */
+async function markReviewed(env: Env, id: string): Promise<Response> {
+  const res = await env.DB.prepare(
+    `UPDATE lessons SET reviewed = 1, updated_at = ? WHERE id = ?`,
+  )
+    .bind(new Date().toISOString(), id)
+    .run()
+  if (!res.meta || (res.meta.changes ?? 0) === 0) {
+    return json({ error: 'Lesson not found' }, 404)
+  }
+  return getLessonDetail(env, id)
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url)
@@ -479,6 +878,62 @@ export default {
       // Match BEFORE /api/courses/:id so "lessons" isn't treated as a course id.
       if (path === '/api/courses/lessons') {
         if (request.method === 'GET') return listNormalizedLessons(env)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // ── WAT-11 lesson detail / editor routes ───────────────────────────────
+      // Match the deepest paths first so :id isn't shadowed.
+
+      // /api/courses/lessons/:id/questions/:order/regenerate
+      const regenOneMatch = path.match(
+        /^\/api\/courses\/lessons\/([^/]+)\/questions\/(\d+)\/regenerate$/,
+      )
+      if (regenOneMatch) {
+        const lid = decodeURIComponent(regenOneMatch[1])
+        const order = Number(regenOneMatch[2])
+        if (request.method === 'POST') return regenerateOne(env, lid, order, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/lessons/:id/questions/:order  (delete a Q+E pair)
+      const delQMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/questions\/(\d+)$/)
+      if (delQMatch) {
+        const lid = decodeURIComponent(delQMatch[1])
+        const order = Number(delQMatch[2])
+        if (request.method === 'DELETE') return deleteQuestionPair(env, lid, order)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/lessons/:id/reorder
+      const reorderMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/reorder$/)
+      if (reorderMatch) {
+        const lid = decodeURIComponent(reorderMatch[1])
+        if (request.method === 'POST') return reorderLesson(env, lid, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/lessons/:id/regenerate  (whole lesson)
+      const regenAllMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/regenerate$/)
+      if (regenAllMatch) {
+        const lid = decodeURIComponent(regenAllMatch[1])
+        if (request.method === 'POST') return regenerateAll(env, lid, request)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/lessons/:id/reviewed
+      const reviewedMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)\/reviewed$/)
+      if (reviewedMatch) {
+        const lid = decodeURIComponent(reviewedMatch[1])
+        if (request.method === 'POST') return markReviewed(env, lid)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses/lessons/:id  (get detail / save edits)
+      const lessonDetailMatch = path.match(/^\/api\/courses\/lessons\/([^/]+)$/)
+      if (lessonDetailMatch) {
+        const lid = decodeURIComponent(lessonDetailMatch[1])
+        if (request.method === 'GET') return getLessonDetail(env, lid)
+        if (request.method === 'PATCH') return saveLessonDetail(env, lid, request)
         return json({ error: 'Method not allowed' }, 405)
       }
 

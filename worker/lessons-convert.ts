@@ -465,6 +465,140 @@ export async function buildAndSaveLesson(
     : { lesson_id: lessonId, question_count: questionCount }
 }
 
+// ── Regeneration helpers (WAT-11) ────────────────────────────────────────────
+//
+// WAT-11 lets the trainer regenerate the WHOLE lesson or just ONE question+
+// explanation pair from the source presentation, honoring the same grounding
+// and language rules as the original convert (WAT-9). Both reuse the pieces
+// above (fetch → extract → prompt → validate); the persistence differs because
+// the lesson row already exists.
+
+/**
+ * Load the source presentation's extracted content + language for a lesson that
+ * was produced by convert. Throws ConvertError if the lesson has no source
+ * presentation or the deck can't be fetched / has too little content.
+ */
+export async function loadSourceContent(
+  deps: ConvertDeps,
+  presentationId: string,
+  token: string,
+): Promise<{ content: ContentSlide[]; language: string | null }> {
+  const detail = await deps.fetchSlides(presentationId, token)
+  const slides = Array.isArray(detail.Slides) ? detail.Slides : []
+  const content = extractContentSlides(slides)
+  if (content.length < MIN_CONTENT_SLIDES) {
+    throw new ConvertError(
+      `Source presentation has only ${content.length} content slide(s); need at least ${MIN_CONTENT_SLIDES}.`,
+      422,
+    )
+  }
+  return { content, language: detail.language ?? null }
+}
+
+/**
+ * Regenerate the WHOLE lesson in place: re-run generation from the source deck
+ * and REPLACE all lesson_slides rows + refresh the lesson's slide-count-derived
+ * estimated_duration_minutes. The lesson id, title and ownership are preserved.
+ * Returns the new question count (+ warning if fewer than target).
+ */
+export async function regenerateLessonAll(
+  db: D1Database,
+  deps: ConvertDeps,
+  lessonId: string,
+  presentationId: string,
+  token: string,
+): Promise<ConvertResult> {
+  const { content, language } = await loadSourceContent(deps, presentationId, token)
+  const target = Math.min(TARGET_QUESTIONS, Math.max(content.length, MIN_QUESTIONS))
+  const questions = await generateQuestions(deps.runAi, content, target, language)
+
+  if (questions.length < MIN_QUESTIONS) {
+    throw new ConvertError(
+      `Could not regenerate at least ${MIN_QUESTIONS} grounded questions from this presentation (got ${questions.length}).`,
+      422,
+    )
+  }
+
+  const questionCount = Math.min(questions.length, TARGET_QUESTIONS)
+  const chosen = questions.slice(0, questionCount)
+  let warning: string | undefined
+  if (questionCount < TARGET_QUESTIONS) {
+    warning = `Generated ${questionCount} of ${TARGET_QUESTIONS} questions — the presentation content only supported ${questionCount}.`
+  }
+
+  const now = new Date().toISOString()
+  const slideCount = chosen.length * 2
+  const estimatedMinutes = Math.max(1, Math.round(slideCount * 0.5))
+
+  // Replace all existing slides, then re-seed interleaved Q1,E1,…
+  await db.prepare(`DELETE FROM lesson_slides WHERE lesson_id = ?`).bind(lessonId).run()
+
+  const statements: D1PreparedStatement[] = []
+  const insert = db.prepare(
+    `INSERT INTO lesson_slides (id, lesson_id, "order", type, content)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+  let order = 0
+  for (const q of chosen) {
+    statements.push(
+      insert.bind(
+        crypto.randomUUID(),
+        lessonId,
+        order++,
+        'question',
+        JSON.stringify({ question: q.question, options: q.options, correct_index: q.correct_index }),
+      ),
+    )
+    statements.push(
+      insert.bind(
+        crypto.randomUUID(),
+        lessonId,
+        order++,
+        'explanation',
+        JSON.stringify({ explanation: q.explanation }),
+      ),
+    )
+  }
+  statements.push(
+    db
+      .prepare(
+        `UPDATE lessons
+            SET estimated_duration_minutes = ?, language = ?, updated_at = ?
+          WHERE id = ?`,
+      )
+      .bind(estimatedMinutes, language, now, lessonId),
+  )
+  await db.batch(statements)
+
+  return warning
+    ? { lesson_id: lessonId, question_count: questionCount, warning }
+    : { lesson_id: lessonId, question_count: questionCount }
+}
+
+/**
+ * Generate ONE fresh grounded question + explanation from the source deck.
+ * Asks the model for a small batch (so it has room to produce a valid one) and
+ * returns the first valid question. Throws ConvertError if none can be made.
+ */
+export async function regenerateOneQuestion(
+  deps: ConvertDeps,
+  presentationId: string,
+  token: string,
+): Promise<GeneratedQuestion> {
+  const { content, language } = await loadSourceContent(deps, presentationId, token)
+  // Ask for a few so the validator has a salvageable candidate even if the
+  // model fumbles one; we keep only the first valid question.
+  const want = Math.min(3, Math.max(1, content.length))
+  const questions = await generateQuestions(deps.runAi, content, want, language)
+  if (!questions.length) {
+    throw new ConvertError(
+      'Could not regenerate a grounded question from this presentation.',
+      422,
+    )
+  }
+  return questions[0]
+}
+
 // ── Real implementations (live route wiring) ─────────────────────────────────
 
 /** Fetch the presentation detail from the presenter API. */

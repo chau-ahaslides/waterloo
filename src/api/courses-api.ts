@@ -70,3 +70,126 @@ export async function convertPresentation(presentationId: number): Promise<Conve
   if (!res.ok) await parseError(res)
   return res.json() as Promise<ConvertResult>
 }
+
+// ── Lesson detail / editor (WAT-11) ─────────────────────────────────────────
+
+/** Content of a question slide (parsed from the slide's content blob). */
+export interface QuestionContent {
+  question: string
+  options: string[]
+  correct_index: number
+}
+
+/** Content of an explanation slide. */
+export interface ExplanationContent {
+  explanation: string
+}
+
+export interface LessonSlide {
+  id: string
+  order: number
+  type: 'question' | 'explanation'
+  content: Record<string, unknown>
+}
+
+export interface LessonDetail {
+  id: string
+  title: string
+  status: 'draft' | 'published'
+  sourcePresentationId: number | null
+  estimatedDurationMinutes: number | null
+  language: string | null
+  reviewed: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LessonDetailResponse {
+  lesson: LessonDetail
+  slides: LessonSlide[]
+}
+
+/** GET one normalized lesson + its ordered slides. */
+export async function fetchLessonDetail(id: string): Promise<LessonDetailResponse> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}`)
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<LessonDetailResponse>
+}
+
+/** Save edits: title, duration, and/or per-slide content. */
+export async function saveLessonDetail(
+  id: string,
+  patch: {
+    title?: string
+    estimatedDurationMinutes?: number | null
+    slides?: Array<{ id: string; content: Record<string, unknown> }>
+  },
+): Promise<LessonDetailResponse> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<LessonDetailResponse>
+}
+
+/** Reorder Q+E pairs by the new sequence of question slide ids. */
+export async function reorderLesson(
+  id: string,
+  questionOrder: string[],
+): Promise<LessonDetailResponse> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}/reorder`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ order: questionOrder }),
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<LessonDetailResponse>
+}
+
+/** Delete the question (at `order`) + its paired explanation. Enforces min 3. */
+export async function deleteQuestionPair(
+  id: string,
+  order: number,
+): Promise<LessonDetailResponse> {
+  const res = await fetch(
+    `/api/courses/lessons/${encodeURIComponent(id)}/questions/${order}`,
+    { method: 'DELETE' },
+  )
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<LessonDetailResponse>
+}
+
+/** Regenerate just ONE Q+E pair from the source presentation. */
+export async function regenerateQuestion(
+  id: string,
+  order: number,
+): Promise<LessonDetailResponse> {
+  const res = await fetch(
+    `/api/courses/lessons/${encodeURIComponent(id)}/questions/${order}/regenerate`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+  )
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<LessonDetailResponse>
+}
+
+/** Regenerate the WHOLE lesson from the source presentation (edits are lost). */
+export async function regenerateLesson(id: string): Promise<LessonDetailResponse> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}/regenerate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<LessonDetailResponse>
+}
+
+/** Mark the lesson as reviewed (called on first page open; gates publish). */
+export async function markLessonReviewed(id: string): Promise<LessonDetailResponse> {
+  const res = await fetch(`/api/courses/lessons/${encodeURIComponent(id)}/reviewed`, {
+    method: 'POST',
+  })
+  if (!res.ok) await parseError(res)
+  return res.json() as Promise<LessonDetailResponse>
+}

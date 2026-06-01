@@ -21,6 +21,8 @@ import {
   buildAndSaveLesson,
   extractContentSlides,
   parseAiQuestions,
+  regenerateLessonAll,
+  regenerateOneQuestion,
   validateQuestion,
   type ConvertDeps,
   type GeneratedQuestion,
@@ -290,5 +292,63 @@ describe('POST /api/lessons/convert — route wiring', () => {
     // convert route intercepts first (GET → 405, not 404).
     const res = await SELF.fetch(`${ORIGIN}/api/lessons/convert`, { method: 'GET' })
     expect(res.status).toBe(405)
+  })
+})
+
+// ── WAT-11 regeneration helpers (mocked deps) ────────────────────────────────
+
+describe('regenerateLessonAll / regenerateOneQuestion (WAT-11)', () => {
+  async function seedLesson(id: string, n: number): Promise<void> {
+    const now = new Date().toISOString()
+    await env.DB.prepare(
+      `INSERT INTO lessons
+         (id, presentation_id, title, description, slides, status,
+          created_at, updated_at, published_at,
+          owner_id, source_presentation_id, estimated_duration_minutes, language, reviewed)
+       VALUES (?, 7, 'T', '', '[]', 'draft', ?, ?, NULL, NULL, 7, 5, 'en', 0)`,
+    )
+      .bind(id, now, now)
+      .run()
+    let order = 0
+    for (let i = 0; i < n; i++) {
+      await env.DB.prepare(
+        `INSERT INTO lesson_slides (id, lesson_id, "order", type, content) VALUES (?, ?, ?, 'question', ?)`,
+      )
+        .bind(`q${id}${i}`, id, order++, JSON.stringify({ question: `old Q${i}`, options: ['a','b','c','d'], correct_index: 0 }))
+        .run()
+      await env.DB.prepare(
+        `INSERT INTO lesson_slides (id, lesson_id, "order", type, content) VALUES (?, ?, ?, 'explanation', ?)`,
+      )
+        .bind(`e${id}${i}`, id, order++, JSON.stringify({ explanation: `old E${i}` }))
+        .run()
+    }
+  }
+
+  it('regenerateLessonAll replaces all slides with fresh interleaved Q/E', async () => {
+    await seedLesson('LA', 3)
+    const deck = { name: 'D', language: 'en', Slides: Array.from({ length: 5 }, (_, i) => contentSlide(i + 1, `S${i}`)) }
+    const d = deps(deck as never, 5)
+    const res = await regenerateLessonAll(env.DB, d, 'LA', '7', 't')
+    expect(res.question_count).toBe(5)
+
+    const { results } = await env.DB.prepare(
+      `SELECT type, content FROM lesson_slides WHERE lesson_id = 'LA' ORDER BY "order"`,
+    ).all<{ type: string; content: string }>()
+    expect(results!.length).toBe(10) // 5 Q + 5 E
+    expect(results![0].type).toBe('question')
+    expect(results![1].type).toBe('explanation')
+    // Fresh content (mkQuestion shape), not the old seeded text.
+    expect(JSON.parse(results![0].content).question).not.toMatch(/old Q/)
+  })
+
+  it('regenerateOneQuestion returns one fresh validated question', async () => {
+    const deck = { name: 'D', language: 'en', Slides: Array.from({ length: 4 }, (_, i) => contentSlide(i + 1, `S${i}`)) }
+    const d = deps(deck as never, 3)
+    const q = await regenerateOneQuestion(d, '7', 't')
+    expect(q.options).toHaveLength(4)
+    expect(q.correct_index).toBeGreaterThanOrEqual(0)
+    expect(q.correct_index).toBeLessThanOrEqual(3)
+    expect(q.question).toBeTruthy()
+    expect(q.explanation).toBeTruthy()
   })
 })
