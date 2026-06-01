@@ -65,6 +65,12 @@ Example challenge format:
 
 Re-fetch the thesis from Confluence (`https://ahaslides.atlassian.net/wiki/spaces/AT/pages/1881866288/Project+AhaSlides+e-Learning`) any time the local copy may be more than a few days old — the doc is updated periodically.
 
+## Avoid duplicate features — confirm first
+
+**MANDATORY** — applies to every build task, every worker, every round.
+
+Before building any new feature or page, FIRST check whether equivalent functionality already exists: search the routes in `src/router`, the views in `src/views/`, and existing endpoints in `worker/`. If the task would DUPLICATE or heavily overlap an existing feature/page, do NOT silently build a second one — surface the overlap in the Slack thread (name the existing page/route) and ASK the requester to confirm whether to extend the existing one, replace it, or intentionally build a parallel version, BEFORE committing to the build.
+
 ## Slide-type architecture
 
 Lessons are a sequence of slides of different **types**. The slide-type layer is
