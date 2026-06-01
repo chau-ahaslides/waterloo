@@ -70,6 +70,45 @@ export interface SlideTypeModule<
    */
   readonly component: Component
 
+  // ── Authoring surface (WAT-3) ─────────────────────────────────────────────
+  // The fields below power the lesson editor. They are OPTIONAL so a module can
+  // be playback-only (converted-but-not-authorable, like the converter-only
+  // `infoSlide`). A module is "authorable" when it sets `authoring: true` and
+  // provides `createBlank` + `editorComponent`. The editor never references a
+  // concrete type — it lists authorable modules from the registry and renders
+  // each slide's `editorComponent`.
+
+  /**
+   * Human-readable label for this type (shown in the editor's "add slide"
+   * palette and the slide-outline rows). Defaults to `type` when omitted.
+   */
+  readonly label?: string
+
+  /**
+   * Whether a trainer can CREATE a blank slide of this type from the editor's
+   * palette. Converted-only types (e.g. `infoSlide`, which only ever comes from
+   * the converter) leave this false/undefined and are still fully editable if
+   * they supply an `editorComponent`, just not creatable from scratch.
+   */
+  readonly authoring?: boolean
+
+  /**
+   * Build a fresh, valid-enough blank slide of this type with the given id.
+   * Only meaningful when `authoring` is true. The editor calls this when the
+   * trainer adds a slide of this type from the palette.
+   */
+  createBlank?(id: number): TSlide
+
+  /**
+   * The Vue component that renders this type's AUTHORING form in the editor's
+   * right pane. Contract for its props + emits:
+   *   props:  { slide: TSlide }
+   *   emits:  `update:slide` (payload: the edited TSlide) — the editor stores it.
+   * A module without an `editorComponent` is not editable (the editor shows a
+   * read-only notice for such slides).
+   */
+  readonly editorComponent?: Component
+
   /**
    * Score contribution for a captured response: 1 for correct, 0 otherwise.
    * Only meaningful when `hasResponse` is true; info-only modules may omit it

@@ -10,11 +10,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import Antd from 'ant-design-vue'
 import type { Lesson } from '@/lessons/lessons'
 
-// --- Mock the lessons store + token ----------------------------------------
-const loadLessons = vi.fn()
+// --- Mock the lessons API + token ------------------------------------------
+const fetchLessons = vi.fn()
 const deleteLesson = vi.fn()
-vi.mock('@/lessons/lessons', () => ({
-  loadLessons: () => loadLessons(),
+vi.mock('@/api/lessons-api', () => ({
+  fetchLessons: () => fetchLessons(),
   deleteLesson: (id: string) => deleteLesson(id),
 }))
 
@@ -38,7 +38,11 @@ function makeLesson(over: Partial<Lesson> = {}): Lesson {
     id: 'lesson_1',
     presentationId: 42,
     title: 'Cell Biology Basics',
+    description: '',
+    status: 'draft',
     createdAt: '2026-05-20T09:00:00Z',
+    updatedAt: '2026-05-20T09:00:00Z',
+    publishedAt: null,
     slides: [
       { id: 1, type: 'pickAnswer', question: 'Q1', options: [{ id: 1, text: 'A', isCorrect: true }] },
       { id: 2, type: 'pickAnswer', question: 'Q2', options: [{ id: 2, text: 'B', isCorrect: false }] },
@@ -62,7 +66,7 @@ function mountHome() {
 beforeEach(() => {
   vi.clearAllMocks()
   getToken.mockReturnValue('valid-token')
-  loadLessons.mockReturnValue([])
+  fetchLessons.mockResolvedValue([])
 })
 
 describe('Home.vue', () => {
@@ -75,17 +79,17 @@ describe('Home.vue', () => {
   })
 
   it('shows the welcome/empty state when the store has no lessons', async () => {
-    loadLessons.mockReturnValue([])
+    fetchLessons.mockResolvedValue([])
     const wrapper = mountHome()
     await flushPromises()
 
-    expect(loadLessons).toHaveBeenCalled()
+    expect(fetchLessons).toHaveBeenCalled()
     expect(wrapper.text()).toContain('Welcome!')
     expect(wrapper.text()).toContain('0 lessons')
   })
 
   it('renders the lessons grid from the store (title, question count, id tag)', async () => {
-    loadLessons.mockReturnValue([
+    fetchLessons.mockResolvedValue([
       makeLesson({ id: 'l1', title: 'Cell Biology Basics', presentationId: 42 }),
       makeLesson({
         id: 'l2',
@@ -100,15 +104,15 @@ describe('Home.vue', () => {
     const text = wrapper.text()
     expect(text).toContain('Cell Biology Basics')
     expect(text).toContain('World Capitals')
-    expect(text).toContain('2 questions') // Cell Biology has 2 slides
-    expect(text).toContain('1 question') // World Capitals has 1 slide
+    expect(text).toContain('2 slides') // Cell Biology has 2 slides
+    expect(text).toContain('1 slide') // World Capitals has 1 slide
     expect(text).toContain('#42')
     expect(text).toContain('#7')
     expect(text).toContain('2 lessons')
   })
 
   it('Preview button pushes to the lesson-play route with the lesson id + query', async () => {
-    loadLessons.mockReturnValue([makeLesson({ id: 'l1', title: 'Cell Biology Basics' })])
+    fetchLessons.mockResolvedValue([makeLesson({ id: 'l1', title: 'Cell Biology Basics' })])
     const wrapper = mountHome()
     await flushPromises()
 
@@ -124,8 +128,8 @@ describe('Home.vue', () => {
   })
 
   it('confirming the delete popconfirm removes the lesson via the store', async () => {
-    loadLessons.mockReturnValue([makeLesson({ id: 'l1', title: 'Cell Biology Basics' })])
-    deleteLesson.mockReturnValue([]) // store returns the new (empty) list
+    fetchLessons.mockResolvedValue([makeLesson({ id: 'l1', title: 'Cell Biology Basics' })])
+    deleteLesson.mockResolvedValue(undefined)
     const wrapper = mountHome()
     await flushPromises()
 

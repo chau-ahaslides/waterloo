@@ -11,13 +11,20 @@ import {
   typeHasResponse,
   scoreForSlide,
   snapshotForSlide,
+  getAuthorableModules,
+  getEditorComponent,
+  getTypeLabel,
+  createBlankSlide,
 } from './registry'
 
 describe('registry — registration', () => {
-  it('registers pickAnswer and infoSlide', () => {
+  it('registers pickAnswer, infoSlide and the 3 authorable content types', () => {
     const types = SLIDE_TYPE_MODULES.map((m) => m.type)
     expect(types).toContain('pickAnswer')
     expect(types).toContain('infoSlide')
+    expect(types).toContain('text')
+    expect(types).toContain('html')
+    expect(types).toContain('youtube')
   })
 
   it('looks up a module + component by type', () => {
@@ -25,6 +32,37 @@ describe('registry — registration', () => {
     expect(getSlideComponent('pickAnswer')).toBeTruthy()
     expect(getSlideTypeModule('nope')).toBeUndefined()
     expect(getSlideComponent('nope')).toBeUndefined()
+  })
+})
+
+describe('registry — authoring surface (WAT-3)', () => {
+  it('lists only authorable modules (pickAnswer/text/html/youtube), not infoSlide', () => {
+    const types = getAuthorableModules().map((m) => m.type)
+    expect(types).toEqual(expect.arrayContaining(['pickAnswer', 'text', 'html', 'youtube']))
+    expect(types).not.toContain('infoSlide')
+  })
+
+  it('exposes an editor component for editable types incl. infoSlide', () => {
+    expect(getEditorComponent('text')).toBeTruthy()
+    expect(getEditorComponent('html')).toBeTruthy()
+    expect(getEditorComponent('youtube')).toBeTruthy()
+    expect(getEditorComponent('pickAnswer')).toBeTruthy()
+    expect(getEditorComponent('infoSlide')).toBeTruthy()
+    expect(getEditorComponent('nope')).toBeUndefined()
+  })
+
+  it('returns human labels (falls back to the type key)', () => {
+    expect(getTypeLabel('pickAnswer')).toBe('Quiz')
+    expect(getTypeLabel('youtube')).toBe('YouTube')
+    expect(getTypeLabel('nope')).toBe('nope')
+  })
+
+  it('createBlankSlide builds a fresh slide for authorable types, null otherwise', () => {
+    expect(createBlankSlide('text', 5)).toMatchObject({ id: 5, type: 'text' })
+    expect(createBlankSlide('youtube', 6)).toMatchObject({ id: 6, type: 'youtube' })
+    // infoSlide has no createBlank ⇒ null
+    expect(createBlankSlide('infoSlide', 7)).toBeNull()
+    expect(createBlankSlide('nope', 8)).toBeNull()
   })
 })
 

@@ -19,10 +19,12 @@ vi.mock('@/api/presentations', () => ({
 
 // --- Mock the lessons converter + persistence ------------------------------
 const convertPresentationToLesson = vi.fn()
-const addLessons = vi.fn()
+const saveLesson = vi.fn()
 vi.mock('@/lessons/lessons', () => ({
   convertPresentationToLesson: (...args: unknown[]) => convertPresentationToLesson(...args),
-  addLessons: (...args: unknown[]) => addLessons(...args),
+}))
+vi.mock('@/api/lessons-api', () => ({
+  saveLesson: (...args: unknown[]) => saveLesson(...args),
 }))
 
 import ConverterModal from './ConverterModal.vue'
@@ -52,7 +54,11 @@ function makeLesson(id: number): Lesson {
     id: `lesson_${id}`,
     presentationId: id,
     title: `Deck ${id}`,
+    description: '',
+    status: 'draft',
     createdAt: '2026-06-01T00:00:00Z',
+    updatedAt: '2026-06-01T00:00:00Z',
+    publishedAt: null,
     slides: [{ id: 1, type: 'pickAnswer', question: 'Q', options: [{ id: 1, text: 'A', isCorrect: true }] }],
   }
 }
@@ -135,6 +141,10 @@ describe('ConverterModal.vue', () => {
       numberOfPresentationPages: 1,
     })
     convertPresentationToLesson.mockImplementation(async (id: number) => makeLesson(id))
+    saveLesson.mockImplementation(async (input: { id: string }) => ({
+      ...makeLesson(Number(input.id.replace('lesson_', ''))),
+      id: input.id,
+    }))
 
     const wrapper = await mountAndOpen()
 
@@ -151,8 +161,8 @@ describe('ConverterModal.vue', () => {
     expect(convertPresentationToLesson).toHaveBeenCalledWith(1, 'Deck One')
     expect(convertPresentationToLesson).toHaveBeenCalledWith(2, 'Deck Two')
 
-    // persisted the created lessons and emitted them to the parent
-    expect(addLessons).toHaveBeenCalledOnce()
+    // persisted each converted lesson to D1 and emitted them to the parent
+    expect(saveLesson).toHaveBeenCalledTimes(2)
     const created = wrapper.emitted('created')
     expect(created).toBeTruthy()
     expect((created![0][0] as Lesson[]).length).toBe(2)
@@ -177,7 +187,7 @@ describe('ConverterModal.vue', () => {
     await vm.confirm()
     await flushPromises()
 
-    expect(addLessons).not.toHaveBeenCalled()
+    expect(saveLesson).not.toHaveBeenCalled()
     expect(wrapper.emitted('created')).toBeFalsy()
     // The skip is surfaced to the user via the convertMsg banner.
     expect(vm.convertMsg).toContain('skipped')

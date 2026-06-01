@@ -9,10 +9,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import Antd from 'ant-design-vue'
 import type { Attempt } from '@/api/attempts'
 
-// --- Mock the lessons store (for the title only) ----------------------------
-const loadLessons = vi.fn()
-vi.mock('@/lessons/lessons', () => ({
-  loadLessons: () => loadLessons(),
+// --- Mock the lessons API (for the title only) ------------------------------
+const fetchLesson = vi.fn()
+vi.mock('@/api/lessons-api', () => ({
+  fetchLesson: (...args: unknown[]) => fetchLesson(...args),
 }))
 
 // --- Mock the attempts API --------------------------------------------------
@@ -64,9 +64,17 @@ function mountReport() {
 }
 
 beforeEach(() => {
-  loadLessons.mockReturnValue([
-    { id: 'l1', presentationId: 5, title: 'Geography Quiz', createdAt: '', slides: [] },
-  ])
+  fetchLesson.mockResolvedValue({
+    id: 'l1',
+    presentationId: 5,
+    title: 'Geography Quiz',
+    description: '',
+    status: 'draft',
+    createdAt: '',
+    updatedAt: '',
+    publishedAt: null,
+    slides: [],
+  })
 })
 
 afterEach(() => vi.clearAllMocks())

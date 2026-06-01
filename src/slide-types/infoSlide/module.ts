@@ -13,6 +13,7 @@
 import type { RawSlide } from '@/api/slides'
 import type { BaseLessonSlide, SlideTypeModule } from '../types'
 import InfoSlide from './InfoSlide.vue'
+import InfoSlideEditor from './InfoSlideEditor.vue'
 
 /** The discriminator key for this type. */
 export const INFO_SLIDE_TYPE = 'infoSlide' as const
@@ -75,6 +76,11 @@ function convert(raw: RawSlide): InfoLessonSlide | null {
 export const infoSlideModule: SlideTypeModule<InfoLessonSlide, never> = {
   type: INFO_SLIDE_TYPE,
   hasResponse: false,
+  label: 'Info',
+  // Converter-only: comes from a presenter `freestyle` slide, not the palette.
+  // Still editable in the editor via `editorComponent`.
+  authoring: false,
   convert,
   component: InfoSlide,
+  editorComponent: InfoSlideEditor,
 }

@@ -10,10 +10,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import Antd from 'ant-design-vue'
 import type { Lesson } from '@/lessons/lessons'
 
-// --- Mock the lessons store -------------------------------------------------
-const loadLessons = vi.fn()
-vi.mock('@/lessons/lessons', () => ({
-  loadLessons: () => loadLessons(),
+// --- Mock the lessons API ---------------------------------------------------
+const fetchLesson = vi.fn()
+vi.mock('@/api/lessons-api', () => ({
+  fetchLesson: (id: string) => fetchLesson(id),
 }))
 
 // --- Mock the attempts API --------------------------------------------------
@@ -38,6 +38,10 @@ function twoQuestionLesson(): Lesson {
     presentationId: 5,
     title: 'Geography Quiz',
     createdAt: '2026-06-01T00:00:00Z',
+    updatedAt: '2026-06-01T00:00:00Z',
+    publishedAt: null,
+    description: '',
+    status: 'draft',
     slides: [
       {
         id: 1,
@@ -79,7 +83,8 @@ async function answerSlide(wrapper: ReturnType<typeof mountTake>, optionIndex: n
 
 beforeEach(() => {
   routeId = 'l1'
-  loadLessons.mockReturnValue([twoQuestionLesson()])
+  fetchLesson.mockImplementation(async (id: string) =>
+      ([twoQuestionLesson()] as Lesson[]).find((l) => l.id === id) ?? null)
   submitAttempt.mockResolvedValue({ id: 'att_1' })
   vi.useFakeTimers()
 })
@@ -90,14 +95,16 @@ afterEach(() => {
 })
 
 describe('TakeLesson.vue', () => {
-  it('shows a start screen with the lesson title and a Start button', () => {
+  it('shows a start screen with the lesson title and a Start button', async () => {
     const wrapper = mountTake()
+    await flushPromises()
     expect(wrapper.text()).toContain('Geography Quiz')
     expect(wrapper.text()).toContain('Start lesson')
   })
 
   it('plays through, submits the attempt with score/total + responses, and confirms', async () => {
     const wrapper = mountTake()
+    await flushPromises()
 
     // Enter a name + start
     await wrapper.find('input').setValue('Ada')
@@ -128,6 +135,7 @@ describe('TakeLesson.vue', () => {
   it('shows an error alert when submission fails (but still completes)', async () => {
     submitAttempt.mockRejectedValueOnce(new Error('network down'))
     const wrapper = mountTake()
+    await flushPromises()
 
     const startBtn = wrapper.findAll('button').find((b) => b.text().includes('Start lesson'))!
     await startBtn.trigger('click')
@@ -144,6 +152,7 @@ describe('TakeLesson.vue', () => {
 
   it('navigates to the report when View report is clicked', async () => {
     const wrapper = mountTake()
+    await flushPromises()
     const startBtn = wrapper.findAll('button').find((b) => b.text().includes('Start lesson'))!
     await startBtn.trigger('click')
     await flushPromises()
@@ -158,9 +167,11 @@ describe('TakeLesson.vue', () => {
     )
   })
 
-  it('renders the not-found screen for an unknown lesson', () => {
-    loadLessons.mockReturnValue([])
+  it('renders the not-found screen for an unknown lesson', async () => {
+    fetchLesson.mockImplementation(async (id: string) =>
+      ([] as Lesson[]).find((l) => l.id === id) ?? null)
     const wrapper = mountTake()
+    await flushPromises()
     expect(wrapper.text()).toContain('Lesson not found')
   })
 })

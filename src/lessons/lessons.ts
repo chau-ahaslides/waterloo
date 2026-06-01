@@ -1,14 +1,16 @@
-// Lessons data model + localStorage persistence.
+// Lessons data model + conversion.
 //
-// There is no backend lessons API yet, so lessons are persisted in
-// localStorage under a namespaced key. A lesson is derived from ONE
-// presentation: every slide whose presenter shape is claimed by a registered
-// slide-type module becomes a lesson slide; everything else is skipped.
+// Lessons are persisted SERVER-SIDE in D1 via the lessons API (src/api/
+// lessons-api.ts) — see WAT-3. This module owns the shared data MODEL and the
+// pure presentation→lesson CONVERSION; it no longer persists anything itself.
+// A lesson is derived from ONE presentation: every slide whose presenter shape
+// is claimed by a registered slide-type module becomes a lesson slide;
+// everything else is skipped.
 //
 // Conversion + the lesson-slide shapes themselves live in the pluggable
 // slide-type registry (src/slide-types/). This module is GENERIC — it never
-// references a concrete slide type. To support a new presenter slide type,
-// register a module in src/slide-types/registry.ts; nothing here changes.
+// references a concrete slide type for conversion. To support a new presenter
+// slide type, register a module in src/slide-types/registry.ts.
 
 import { fetchPresentationSlides } from '@/api/slides'
 import { convertRawSlide } from '@/slide-types/registry'
@@ -18,11 +20,19 @@ import type {
   PickAnswerOption,
 } from '@/slide-types/pickAnswer/module'
 import type { InfoLessonSlide } from '@/slide-types/infoSlide/module'
+import type { TextLessonSlide } from '@/slide-types/text/module'
+import type { HtmlLessonSlide } from '@/slide-types/html/module'
+import type { YoutubeLessonSlide } from '@/slide-types/youtube/module'
 
 // Re-export the concrete slide-type shapes so existing imports keep working.
-export type { PickAnswerLessonSlide, PickAnswerOption, InfoLessonSlide }
-
-const STORAGE_KEY = 'waterloo.lessons'
+export type {
+  PickAnswerLessonSlide,
+  PickAnswerOption,
+  InfoLessonSlide,
+  TextLessonSlide,
+  HtmlLessonSlide,
+  YoutubeLessonSlide,
+}
 
 /**
  * A lesson slide of any registered type — a discriminated union over the
@@ -32,6 +42,9 @@ const STORAGE_KEY = 'waterloo.lessons'
 export type LessonSlide =
   | PickAnswerLessonSlide
   | InfoLessonSlide
+  | TextLessonSlide
+  | HtmlLessonSlide
+  | YoutubeLessonSlide
   | BaseLessonSlide
 
 /**
@@ -45,48 +58,23 @@ export interface LessonOption {
   image?: string | null
 }
 
-/** A lesson derived from a single presentation. */
+/** Lesson lifecycle status. */
+export type LessonStatus = 'draft' | 'published'
+
+/** A lesson derived from a single presentation (or hand-authored). */
 export interface Lesson {
   id: string
   presentationId: number
   title: string
-  createdAt: string
+  description: string
   slides: LessonSlide[]
+  status: LessonStatus
+  createdAt: string
+  updatedAt: string
+  publishedAt: string | null
 }
 
-/** Read all stored lessons (most-recent first). Tolerant of corrupt data. */
-export function loadLessons(): Lesson[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed as Lesson[]
-  } catch {
-    return []
-  }
-}
-
-/** Persist the full lessons list. */
-export function saveLessons(lessons: Lesson[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(lessons))
-}
-
-/** Append lessons to storage (newest first) and return the new full list. */
-export function addLessons(newLessons: Lesson[]): Lesson[] {
-  const all = [...newLessons, ...loadLessons()]
-  saveLessons(all)
-  return all
-}
-
-/** Delete one lesson by id and return the new full list. */
-export function deleteLesson(id: string): Lesson[] {
-  const all = loadLessons().filter((l) => l.id !== id)
-  saveLessons(all)
-  return all
-}
-
-function newLessonId(): string {
+export function newLessonId(): string {
   // Prefer crypto.randomUUID where available; fall back to a timestamp+random.
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return `lesson_${crypto.randomUUID()}`
@@ -111,11 +99,16 @@ export async function convertPresentationToLesson(
     .filter((s): s is LessonSlide => s !== null)
 
   if (!slides.length) return null
+  const now = new Date().toISOString()
   return {
     id: newLessonId(),
     presentationId,
     title: presentationName?.trim() || `Presentation ${presentationId}`,
-    createdAt: new Date().toISOString(),
+    description: '',
     slides,
+    status: 'draft',
+    createdAt: now,
+    updatedAt: now,
+    publishedAt: null,
   }
 }

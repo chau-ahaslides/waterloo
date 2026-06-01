@@ -10,6 +10,9 @@ import type { RawSlide } from '@/api/slides'
 import type { AnyLessonSlide, SlideTypeModule } from './types'
 import { pickAnswerModule } from './pickAnswer/module'
 import { infoSlideModule } from './infoSlide/module'
+import { textModule } from './text/module'
+import { htmlModule } from './html/module'
+import { youtubeModule } from './youtube/module'
 
 /**
  * Every registered slide-type module, in CONVERSION-PRIORITY order. When
@@ -22,6 +25,9 @@ export const SLIDE_TYPE_MODULES: ReadonlyArray<
 > = [
   pickAnswerModule as unknown as SlideTypeModule<AnyLessonSlide, unknown>,
   infoSlideModule as unknown as SlideTypeModule<AnyLessonSlide, unknown>,
+  textModule as unknown as SlideTypeModule<AnyLessonSlide, unknown>,
+  htmlModule as unknown as SlideTypeModule<AnyLessonSlide, unknown>,
+  youtubeModule as unknown as SlideTypeModule<AnyLessonSlide, unknown>,
 ]
 
 const BY_TYPE = new Map(SLIDE_TYPE_MODULES.map((m) => [m.type, m]))
@@ -36,6 +42,43 @@ export function getSlideTypeModule(
 /** The render+response component for a lesson-slide `type`, or undefined. */
 export function getSlideComponent(type: string): Component | undefined {
   return BY_TYPE.get(type)?.component
+}
+
+/** The authoring/editor form component for a lesson-slide `type`, or undefined. */
+export function getEditorComponent(type: string): Component | undefined {
+  return BY_TYPE.get(type)?.editorComponent
+}
+
+/** Human-readable label for a slide type (falls back to the type key). */
+export function getTypeLabel(type: string): string {
+  const mod = BY_TYPE.get(type)
+  return mod?.label ?? type
+}
+
+/**
+ * The modules a trainer can ADD from the editor palette (authorable types with
+ * a blank-slide factory + an editor form), in registry order.
+ */
+export function getAuthorableModules(): ReadonlyArray<
+  SlideTypeModule<AnyLessonSlide, unknown>
+> {
+  return SLIDE_TYPE_MODULES.filter(
+    (m) => m.authoring && typeof m.createBlank === 'function' && m.editorComponent,
+  )
+}
+
+/**
+ * Create a fresh blank slide of `type` with the given id via the owning
+ * module's `createBlank`, or null if the type is not authorable. Used by the
+ * editor's "add slide" action.
+ */
+export function createBlankSlide(
+  type: string,
+  id: number,
+): AnyLessonSlide | null {
+  const mod = BY_TYPE.get(type)
+  if (!mod?.createBlank) return null
+  return mod.createBlank(id)
 }
 
 /**

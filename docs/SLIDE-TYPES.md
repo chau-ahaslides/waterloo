@@ -26,6 +26,24 @@ src/slide-types/
   infoSlide/               # second module — INFO-ONLY, no response
     module.ts
     InfoSlide.vue          # titled content card + Continue button
+    InfoSlideEditor.vue    # authoring form (editable, converter-only)
+    module.test.ts
+  text/                    # WAT-3 — authorable plain-text content block
+    module.ts
+    TextSlide.vue          # player render
+    TextSlideEditor.vue    # authoring form
+    module.test.ts
+  html/                    # WAT-3 — authorable raw-HTML block (sanitized)
+    module.ts
+    sanitize.ts            # XSS-safe allowlist sanitizer (used by render+editor)
+    HtmlSlide.vue          # player render (v-html on sanitized output)
+    HtmlSlideEditor.vue    # authoring form + live sanitized preview
+    module.test.ts
+    sanitize.test.ts
+  youtube/                 # WAT-3 — authorable embedded YouTube video
+    module.ts              # incl. parseYouTubeId / youtubeEmbedUrl
+    YoutubeSlide.vue       # player render (iframe)
+    YoutubeSlideEditor.vue # authoring form + preview
     module.test.ts
 ```
 
@@ -49,10 +67,65 @@ interface SlideTypeModule<TSlide extends BaseLessonSlide, TResponse> {
   convert(raw: RawSlide): TSlide | null   // map raw presenter slide or null
   component: Component               // renders + receives its own response
   scoreFor?(slide: TSlide, response: TResponse): number  // response types only
+
+  // ── Authoring surface (WAT-3) — all optional ─────────────────────────────
+  label?: string                     // palette/outline label (defaults to type)
+  authoring?: boolean                // true = creatable from the editor palette
+  createBlank?(id: number): TSlide   // fresh blank slide (authorable types)
+  editorComponent?: Component        // the authoring form (props: {slide}; emits: update:slide)
 }
 ```
 
 Every lesson slide extends `BaseLessonSlide` (`{ id: number; type: string }`).
+
+### Authoring (the lesson editor — WAT-3)
+
+The lesson editor (`src/views/LessonEditor.vue`, route `/lessons/:id/edit`) is
+slide-type-agnostic: it builds the "add slide" palette from
+`getAuthorableModules()` and renders each slide's form via
+`getEditorComponent(type)`. A module is:
+
+- **authorable** — `authoring: true` + `createBlank` + `editorComponent`: the
+  trainer can add a blank slide of this type AND edit it. (`text`, `html`,
+  `youtube`, `pickAnswer`.)
+- **editable-only** — has an `editorComponent` but `authoring` is false: it
+  comes from the converter and is editable but not creatable from scratch.
+  (`infoSlide`.)
+- **playback-only** — no `editorComponent`: plays but shows a read-only notice
+  in the editor.
+
+The editor never references a concrete type. Registry helpers added in WAT-3:
+`getAuthorableModules()`, `getEditorComponent(type)`, `getTypeLabel(type)`,
+`createBlankSlide(type, id)`.
+
+### Editor-form component contract
+
+| | props | emits |
+| --- | --- | --- |
+| Authoring form (`editorComponent`) | `slide: TSlide` | `update:slide` (payload = edited `TSlide`) |
+
+The form is controlled: it never mutates `slide`; it emits a NEW slide built
+from `{ ...props.slide, ...patch }` and the editor stores it. (Edit one field at
+a time — two synchronous patches off the same `props.slide` would clobber each
+other, which is the natural human flow anyway.)
+
+### The three authorable content types (WAT-3)
+
+All three are **info-only** (`hasResponse: false`) — content blocks a trainer
+adds to frame/enrich a converted lesson:
+
+- **`text`** — optional heading + plain-text body (line breaks preserved).
+- **`html`** — optional heading + raw HTML, **sanitized on render** via
+  `html/sanitize.ts` (a dependency-free allowlist that strips
+  `script`/`style`/`iframe`/event-handlers/`javascript:` URLs and unwraps
+  unknown tags). The stored value is the trainer's raw HTML; sanitization is at
+  render time so the editor preview and player share one source of truth.
+- **`youtube`** — optional heading + a YouTube URL or bare id; `parseYouTubeId`
+  resolves watch / youtu.be / embed / shorts / live links to the 11-char id,
+  rendered as a privacy-friendly `youtube-nocookie.com/embed` iframe.
+
+`pickAnswer` is now authorable too (add/edit a **formative** quiz — immediate
+feedback, no points/pass score). `infoSlide` gained an editor form.
 
 ### Component props + emits
 

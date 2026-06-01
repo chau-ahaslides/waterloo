@@ -6,38 +6,55 @@ import {
   BarChartOutlined,
   BookOutlined,
   DeleteOutlined,
+  EditOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReadOutlined,
   RocketOutlined,
 } from '@ant-design/icons-vue'
 import { getToken } from '@/api/presentations'
-import {
-  deleteLesson,
-  loadLessons,
-  type Lesson,
-} from '@/lessons/lessons'
+import { type Lesson } from '@/lessons/lessons'
+import { deleteLesson, fetchLessons } from '@/api/lessons-api'
 import ConverterModal from '@/views/ConverterModal.vue'
 import { ahaPalettes } from '@/theme/brandTokens'
 
 const lessons = ref<Lesson[]>([])
+const loading = ref(false)
+const loadError = ref<string | null>(null)
 const converterOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
 
 const hasToken = computed(() => !!getToken())
 
-onMounted(() => {
-  lessons.value = loadLessons()
-})
+async function loadAll() {
+  loading.value = true
+  loadError.value = null
+  try {
+    lessons.value = await fetchLessons()
+  } catch (e) {
+    loadError.value =
+      e instanceof Error ? e.message : 'Could not load your lessons.'
+    lessons.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(loadAll)
 
 function onCreated(created: Lesson[]) {
   // Newest lessons are prepended by the converter; merge into local state.
   lessons.value = [...created, ...lessons.value]
 }
 
-function removeLesson(id: string) {
-  lessons.value = deleteLesson(id)
+async function removeLesson(id: string) {
+  await deleteLesson(id)
+  lessons.value = lessons.value.filter((l) => l.id !== id)
+}
+
+function editLesson(l: Lesson) {
+  router.push({ name: 'lesson-edit', params: { id: l.id }, query: route.query })
 }
 
 function questionCount(l: Lesson): number {
@@ -96,6 +113,20 @@ function lessonColor(l: Lesson): string {
       </div>
     </header>
 
+    <!-- Load error -->
+    <a-alert
+      v-if="loadError"
+      type="error"
+      show-icon
+      message="Could not load lessons"
+      :description="loadError"
+      class="mb-4 rounded-aha"
+    >
+      <template #action>
+        <a-button size="small" type="primary" @click="loadAll">Retry</a-button>
+      </template>
+    </a-alert>
+
     <!-- No token -->
     <a-alert
       v-if="!hasToken"
@@ -149,15 +180,23 @@ function lessonColor(l: Lesson): string {
           </div>
         </template>
 
-        <h3
-          class="mb-1 truncate font-semibold text-aha-space"
-          :title="l.title"
-        >
-          {{ l.title }}
-        </h3>
+        <div class="mb-1 flex items-center gap-2">
+          <h3
+            class="min-w-0 flex-1 truncate font-semibold text-aha-space"
+            :title="l.title"
+          >
+            {{ l.title }}
+          </h3>
+          <a-tag
+            :color="l.status === 'published' ? 'green' : 'default'"
+            class="m-0 shrink-0 capitalize"
+          >
+            {{ l.status }}
+          </a-tag>
+        </div>
         <div class="mb-3 flex items-center gap-3 text-xs text-aha-indigo">
           <span class="inline-flex items-center gap-1">
-            <BookOutlined /> {{ questionCount(l) }} question{{
+            <BookOutlined /> {{ questionCount(l) }} slide{{
               questionCount(l) === 1 ? '' : 's'
             }}
           </span>
@@ -166,6 +205,14 @@ function lessonColor(l: Lesson): string {
         <div class="flex items-center justify-between gap-2">
           <a-tag class="m-0 font-mono">#{{ l.presentationId }}</a-tag>
           <div class="flex items-center gap-1">
+            <a-button
+              size="small"
+              class="inline-flex items-center"
+              @click="editLesson(l)"
+            >
+              <template #icon><EditOutlined /></template>
+              Edit
+            </a-button>
             <a-button
               size="small"
               class="inline-flex items-center"

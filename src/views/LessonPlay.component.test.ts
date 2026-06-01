@@ -10,10 +10,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import Antd from 'ant-design-vue'
 import type { Lesson } from '@/lessons/lessons'
 
-// --- Mock the lessons store -------------------------------------------------
-const loadLessons = vi.fn()
-vi.mock('@/lessons/lessons', () => ({
-  loadLessons: () => loadLessons(),
+// --- Mock the lessons API ---------------------------------------------------
+const fetchLesson = vi.fn()
+vi.mock('@/api/lessons-api', () => ({
+  fetchLesson: (id: string) => fetchLesson(id),
 }))
 
 // --- Mock the router --------------------------------------------------------
@@ -32,6 +32,10 @@ function twoQuestionLesson(): Lesson {
     presentationId: 5,
     title: 'Geography Quiz',
     createdAt: '2026-06-01T00:00:00Z',
+    updatedAt: '2026-06-01T00:00:00Z',
+    publishedAt: null,
+    description: '',
+    status: 'draft',
     slides: [
       {
         id: 1,
@@ -76,7 +80,8 @@ afterEach(() => {
 
 describe('LessonPlay.vue', () => {
   it('renders the first question and its options', async () => {
-    loadLessons.mockReturnValue([twoQuestionLesson()])
+    fetchLesson.mockImplementation(async (id: string) =>
+      ([twoQuestionLesson()] as Lesson[]).find((l) => l.id === id) ?? null)
     const wrapper = mountPlay()
     await flushPromises()
 
@@ -90,7 +95,8 @@ describe('LessonPlay.vue', () => {
 
   it('shows the "not found" screen for an unknown lesson id', async () => {
     routeId = 'does-not-exist'
-    loadLessons.mockReturnValue([twoQuestionLesson()])
+    fetchLesson.mockImplementation(async (id: string) =>
+      ([twoQuestionLesson()] as Lesson[]).find((l) => l.id === id) ?? null)
     const wrapper = mountPlay()
     await flushPromises()
 
@@ -98,7 +104,8 @@ describe('LessonPlay.vue', () => {
   })
 
   it('selecting a correct answer tallies the score and auto-advances to the next question', async () => {
-    loadLessons.mockReturnValue([twoQuestionLesson()])
+    fetchLesson.mockImplementation(async (id: string) =>
+      ([twoQuestionLesson()] as Lesson[]).find((l) => l.id === id) ?? null)
     const wrapper = mountPlay()
     await flushPromises()
 
@@ -120,7 +127,8 @@ describe('LessonPlay.vue', () => {
   })
 
   it('after the last question shows the completion screen with the final score', async () => {
-    loadLessons.mockReturnValue([twoQuestionLesson()])
+    fetchLesson.mockImplementation(async (id: string) =>
+      ([twoQuestionLesson()] as Lesson[]).find((l) => l.id === id) ?? null)
     const wrapper = mountPlay()
     await flushPromises()
 
@@ -142,7 +150,8 @@ describe('LessonPlay.vue', () => {
   })
 
   it('shows a perfect-score message when all answers are correct', async () => {
-    loadLessons.mockReturnValue([twoQuestionLesson()])
+    fetchLesson.mockImplementation(async (id: string) =>
+      ([twoQuestionLesson()] as Lesson[]).find((l) => l.id === id) ?? null)
     const wrapper = mountPlay()
     await flushPromises()
 
@@ -159,7 +168,8 @@ describe('LessonPlay.vue', () => {
   })
 
   it('ignores a second tap while feedback is showing (double-tap guard)', async () => {
-    loadLessons.mockReturnValue([twoQuestionLesson()])
+    fetchLesson.mockImplementation(async (id: string) =>
+      ([twoQuestionLesson()] as Lesson[]).find((l) => l.id === id) ?? null)
     const wrapper = mountPlay()
     await flushPromises()
 
@@ -181,6 +191,10 @@ describe('LessonPlay.vue', () => {
       presentationId: 5,
       title: 'Mixed Lesson',
       createdAt: '2026-06-01T00:00:00Z',
+      updatedAt: '2026-06-01T00:00:00Z',
+      publishedAt: null,
+      description: '',
+      status: 'draft',
       slides: [
         { id: 1, type: 'infoSlide', title: 'Welcome', body: 'Read this first.' },
         {
@@ -194,7 +208,8 @@ describe('LessonPlay.vue', () => {
         },
       ],
     } as unknown as Lesson
-    loadLessons.mockReturnValue([mixedLesson])
+    fetchLesson.mockImplementation(async (id: string) =>
+      ([mixedLesson] as Lesson[]).find((l) => l.id === id) ?? null)
     const wrapper = mountPlay()
     await flushPromises()
 

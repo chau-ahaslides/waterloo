@@ -14,6 +14,7 @@ import Home from '@/views/Home.vue'
 import LessonPlay from '@/views/LessonPlay.vue'
 import TakeLesson from '@/views/TakeLesson.vue'
 import LessonReport from '@/views/LessonReport.vue'
+import LessonEditor from '@/views/LessonEditor.vue'
 import PresentationList from '@/views/PresentationList.vue'
 
 const router = createRouter({
@@ -24,6 +25,12 @@ const router = createRouter({
       path: '/presentations',
       name: 'presentations',
       component: PresentationList,
+    },
+    {
+      // Lesson editor (curate/enrich a converted or hand-authored lesson).
+      path: '/lessons/:id/edit',
+      name: 'lesson-edit',
+      component: LessonEditor,
     },
     {
       path: '/lesson/:id/play',

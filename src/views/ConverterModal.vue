@@ -12,10 +12,10 @@ import {
   type SortOrder,
 } from '@/api/presentations'
 import {
-  addLessons,
   convertPresentationToLesson,
   type Lesson,
 } from '@/lessons/lessons'
+import { saveLesson } from '@/api/lessons-api'
 import { ahaPalettes } from '@/theme/brandTokens'
 
 const props = defineProps<{ open: boolean }>()
@@ -125,8 +125,19 @@ async function confirm() {
     const name = pres?.name || `Presentation ${id}`
     try {
       const lesson = await convertPresentationToLesson(id, name)
-      if (lesson) created.push(lesson)
-      else skipped.push(name)
+      if (!lesson) {
+        skipped.push(name)
+        continue
+      }
+      // Seed a DRAFT lesson server-side (D1) so the editor + audience can load it.
+      const saved = await saveLesson({
+        id: lesson.id,
+        presentationId: lesson.presentationId,
+        title: lesson.title,
+        description: lesson.description,
+        slides: lesson.slides,
+      })
+      created.push(saved)
     } catch {
       failed.push(name)
     }
@@ -135,8 +146,7 @@ async function confirm() {
   converting.value = false
 
   if (created.length) {
-    // Persist to localStorage, then notify the parent for in-memory update.
-    addLessons(created)
+    // Persisted to D1; notify the parent for in-memory update.
     emit('created', created)
   }
 

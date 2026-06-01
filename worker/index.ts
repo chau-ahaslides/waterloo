@@ -8,15 +8,21 @@
  *     normally reach this Worker; the env.ASSETS.fetch() below is a safety net.
  *
  * API (all JSON in/out):
- *   - GET  /api/health
- *   - POST /api/lessons/:lessonId/attempts   → insert ONE attempt; returns it.
- *   - GET  /api/lessons/:lessonId/attempts   → all attempts for a lesson,
- *                                              newest first (for the report).
+ *   - GET    /api/health
+ *   - GET    /api/lessons                      → list lessons (newest first).
+ *   - GET    /api/lessons/:id                  → one lesson, or 404.
+ *   - PUT    /api/lessons/:id                  → upsert (save draft); returns it.
+ *   - DELETE /api/lessons/:id                  → delete a lesson.
+ *   - POST   /api/lessons/:id/publish          → status=published + publishedAt.
+ *   - POST   /api/lessons/:lessonId/attempts   → insert ONE attempt; returns it.
+ *   - GET    /api/lessons/:lessonId/attempts   → all attempts for a lesson,
+ *                                                newest first (for the report).
  *
- * Attempts are persisted in D1 (`env.DB`). Multiple attempts per lesson are
- * allowed — every POST is a new row (no upsert/dedupe). Each row carries a
- * self-contained per-slide `responses` snapshot so the report renders from D1
- * alone (the lesson definition itself lives only in the creator's localStorage).
+ * Lessons (WAT-3) AND attempts (WAT-5) are persisted in D1 (`env.DB`). Lessons
+ * are the source of truth for the editor + audience; the whole slide array is
+ * stored as an opaque JSON blob (slide-type-defined shapes). Attempts allow
+ * multiple rows per lesson (no dedupe); each carries a self-contained per-slide
+ * `responses` snapshot so the report renders from D1 alone.
  */
 
 /** One per-slide snapshot inside an attempt's `responses` array. */
@@ -158,6 +164,165 @@ async function listAttempts(env: Env, lessonId: string): Promise<Response> {
   return json({ attempts })
 }
 
+// ── Lessons (WAT-3) ──────────────────────────────────────────────────────────
+
+type LessonStatus = 'draft' | 'published'
+
+/** The DB row shape for a lesson (slides stored as JSON text). */
+interface LessonRow {
+  id: string
+  presentation_id: number
+  title: string
+  description: string
+  slides: string
+  status: string
+  created_at: string
+  updated_at: string
+  published_at: string | null
+}
+
+/** The lesson shape returned by the API (slides parsed into an array). */
+interface Lesson {
+  id: string
+  presentationId: number
+  title: string
+  description: string
+  slides: unknown[]
+  status: LessonStatus
+  createdAt: string
+  updatedAt: string
+  publishedAt: string | null
+}
+
+/** Map a DB row → API lesson (parse the JSON slides blob). */
+function rowToLesson(row: LessonRow): Lesson {
+  let slides: unknown[] = []
+  try {
+    const parsed = JSON.parse(row.slides)
+    if (Array.isArray(parsed)) slides = parsed
+  } catch {
+    slides = []
+  }
+  return {
+    id: row.id,
+    presentationId: row.presentation_id,
+    title: row.title,
+    description: row.description,
+    slides,
+    status: row.status === 'published' ? 'published' : 'draft',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    publishedAt: row.published_at,
+  }
+}
+
+/** GET /api/lessons — all lessons, newest-updated first. */
+async function listLessons(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, presentation_id, title, description, slides, status,
+            created_at, updated_at, published_at
+       FROM lessons
+      ORDER BY updated_at DESC`,
+  ).all<LessonRow>()
+  return json({ lessons: (results ?? []).map(rowToLesson) })
+}
+
+/** GET /api/lessons/:id — one lesson, or 404. */
+async function getLesson(env: Env, id: string): Promise<Response> {
+  if (!id) return json({ error: 'Missing lesson id' }, 400)
+  const row = await env.DB.prepare(
+    `SELECT id, presentation_id, title, description, slides, status,
+            created_at, updated_at, published_at
+       FROM lessons WHERE id = ?`,
+  )
+    .bind(id)
+    .first<LessonRow>()
+  if (!row) return json({ error: 'Lesson not found' }, 404)
+  return json({ lesson: rowToLesson(row) })
+}
+
+/**
+ * PUT /api/lessons/:id — upsert (save draft). Creates the lesson if new;
+ * updates title/description/slides + bumps updated_at if it exists, preserving
+ * the existing status/created_at/published_at (publishing is a separate route).
+ */
+async function upsertLesson(
+  env: Env,
+  id: string,
+  request: Request,
+): Promise<Response> {
+  if (!id) return json({ error: 'Missing lesson id' }, 400)
+
+  let body: Record<string, unknown>
+  try {
+    body = (await request.json()) as Record<string, unknown>
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400)
+  }
+
+  const title = typeof body.title === 'string' ? body.title : ''
+  const description =
+    typeof body.description === 'string' ? body.description : ''
+  const presentationId =
+    typeof body.presentationId === 'number' ? Math.floor(body.presentationId) : 0
+  const slides = Array.isArray(body.slides) ? body.slides : []
+  const slidesJson = JSON.stringify(slides)
+  const now = new Date().toISOString()
+
+  const existing = await env.DB.prepare(
+    `SELECT id, status, created_at FROM lessons WHERE id = ?`,
+  )
+    .bind(id)
+    .first<{ id: string; status: string; created_at: string }>()
+
+  if (existing) {
+    await env.DB.prepare(
+      `UPDATE lessons
+          SET presentation_id = ?, title = ?, description = ?, slides = ?,
+              updated_at = ?
+        WHERE id = ?`,
+    )
+      .bind(presentationId, title, description, slidesJson, now, id)
+      .run()
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO lessons
+         (id, presentation_id, title, description, slides, status,
+          created_at, updated_at, published_at)
+       VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, NULL)`,
+    )
+      .bind(id, presentationId, title, description, slidesJson, now, now)
+      .run()
+  }
+
+  return getLesson(env, id)
+}
+
+/** DELETE /api/lessons/:id. */
+async function deleteLesson(env: Env, id: string): Promise<Response> {
+  if (!id) return json({ error: 'Missing lesson id' }, 400)
+  await env.DB.prepare(`DELETE FROM lessons WHERE id = ?`).bind(id).run()
+  return json({ ok: true })
+}
+
+/** POST /api/lessons/:id/publish — status=published + publishedAt. */
+async function publishLesson(env: Env, id: string): Promise<Response> {
+  if (!id) return json({ error: 'Missing lesson id' }, 400)
+  const now = new Date().toISOString()
+  const res = await env.DB.prepare(
+    `UPDATE lessons
+        SET status = 'published', published_at = ?, updated_at = ?
+      WHERE id = ?`,
+  )
+    .bind(now, now, id)
+    .run()
+  // D1 reports affected rows in meta.changes.
+  if (!res.meta || (res.meta.changes ?? 0) === 0) {
+    return json({ error: 'Lesson not found' }, 404)
+  }
+  return getLesson(env, id)
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url)
@@ -168,7 +333,7 @@ export default {
         return json({ ok: true, service: 'waterloo' })
       }
 
-      // /api/lessons/:lessonId/attempts
+      // /api/lessons/:lessonId/attempts  (match BEFORE the bare-id route)
       const attemptsMatch = path.match(/^\/api\/lessons\/([^/]+)\/attempts$/)
       if (attemptsMatch) {
         const lessonId = decodeURIComponent(attemptsMatch[1])
@@ -178,6 +343,30 @@ export default {
         if (request.method === 'GET') {
           return listAttempts(env, lessonId)
         }
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/lessons/:id/publish
+      const publishMatch = path.match(/^\/api\/lessons\/([^/]+)\/publish$/)
+      if (publishMatch) {
+        const id = decodeURIComponent(publishMatch[1])
+        if (request.method === 'POST') return publishLesson(env, id)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/lessons  (list)
+      if (path === '/api/lessons') {
+        if (request.method === 'GET') return listLessons(env)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/lessons/:id  (get / upsert / delete)
+      const lessonMatch = path.match(/^\/api\/lessons\/([^/]+)$/)
+      if (lessonMatch) {
+        const id = decodeURIComponent(lessonMatch[1])
+        if (request.method === 'GET') return getLesson(env, id)
+        if (request.method === 'PUT') return upsertLesson(env, id, request)
+        if (request.method === 'DELETE') return deleteLesson(env, id)
         return json({ error: 'Method not allowed' }, 405)
       }
 

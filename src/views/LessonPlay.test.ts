@@ -25,6 +25,10 @@ function makeLesson(slides: PickAnswerLessonSlide[]): Lesson {
     presentationId: 1,
     title: 'Test Lesson',
     createdAt: '2026-06-01T00:00:00Z',
+    updatedAt: '2026-06-01T00:00:00Z',
+    publishedAt: null,
+    description: '',
+    status: 'draft',
     slides,
   }
 }

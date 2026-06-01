@@ -11,6 +11,7 @@
 import { isPickAnswerSlide, type RawSlide, type RawSlideOption } from '@/api/slides'
 import type { BaseLessonSlide, SlideTypeModule } from '../types'
 import PickAnswerSlide from './PickAnswerSlide.vue'
+import PickAnswerEditor from './PickAnswerEditor.vue'
 
 /** The discriminator key for this type. */
 export const PICK_ANSWER_TYPE = 'pickAnswer' as const
@@ -58,8 +59,22 @@ export const pickAnswerModule: SlideTypeModule<
 > = {
   type: PICK_ANSWER_TYPE,
   hasResponse: true,
+  label: 'Quiz',
+  authoring: true,
   convert,
   component: PickAnswerSlide,
+  editorComponent: PickAnswerEditor,
+  createBlank(id) {
+    return {
+      id,
+      type: PICK_ANSWER_TYPE,
+      question: '',
+      options: [
+        { id: 1, text: '', isCorrect: true },
+        { id: 2, text: '', isCorrect: false },
+      ],
+    }
+  },
   scoreFor(slide, response) {
     const opt = slide.options.find((o) => o.id === response)
     return opt?.isCorrect ? 1 : 0

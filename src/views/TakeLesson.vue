@@ -9,7 +9,7 @@
 //      then show a confirmation + a link to the report. Audience can retake;
 //      each run posts a NEW attempt (multiple attempts per lesson allowed).
 
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeftOutlined,
@@ -18,7 +18,8 @@ import {
   RocketOutlined,
   TrophyOutlined,
 } from '@ant-design/icons-vue'
-import { loadLessons, type Lesson } from '@/lessons/lessons'
+import { type Lesson } from '@/lessons/lessons'
+import { fetchLesson } from '@/api/lessons-api'
 import { submitAttempt, type AttemptResponse } from '@/api/attempts'
 import LessonPlayer from '@/views/LessonPlayer.vue'
 
@@ -27,8 +28,17 @@ const route = useRoute()
 const router = useRouter()
 const lessonId = route.params.id as string
 
-// ── Load lesson ───────────────────────────────────────────────────────────────
-const lesson = loadLessons().find((l: Lesson) => l.id === lessonId) ?? null
+// ── Load lesson (from D1) ───────────────────────────────────────────────────────
+const lesson = ref<Lesson | null>(null)
+const loadingLesson = ref(true)
+
+onMounted(async () => {
+  try {
+    lesson.value = await fetchLesson(lessonId)
+  } finally {
+    loadingLesson.value = false
+  }
+})
 
 // ── Phase state ───────────────────────────────────────────────────────────────
 type Phase = 'start' | 'playing' | 'submitting' | 'done'
@@ -88,9 +98,18 @@ function goHome() {
 </script>
 
 <template>
+  <!-- ── Loading ────────────────────────────────────────────────────────────── -->
+  <main
+    v-if="loadingLesson"
+    class="flex min-h-[100dvh] w-full flex-col items-center justify-center gap-6 bg-aha-blush px-6 text-center"
+  >
+    <div class="text-5xl text-aha-purple"><LoadingOutlined spin /></div>
+    <h1 class="text-xl font-extrabold text-aha-space">Loading lesson…</h1>
+  </main>
+
   <!-- ── Unknown lesson ─────────────────────────────────────────────────────── -->
   <main
-    v-if="!lesson"
+    v-else-if="!lesson"
     class="flex min-h-[100dvh] w-full flex-col items-center justify-center gap-6 bg-aha-blush px-6 text-center"
   >
     <div class="flex h-20 w-20 items-center justify-center rounded-full bg-aha-lavender text-4xl text-aha-purple">

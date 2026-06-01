@@ -19,16 +19,17 @@ import {
   TeamOutlined,
 } from '@ant-design/icons-vue'
 import { fetchAttempts, type Attempt } from '@/api/attempts'
-import { loadLessons, type Lesson } from '@/lessons/lessons'
+import { fetchLesson } from '@/api/lessons-api'
+import { type Lesson } from '@/lessons/lessons'
 
 const route = useRoute()
 const router = useRouter()
 const lessonId = route.params.id as string
 
-// Lesson title comes from localStorage when available (creator's device);
-// otherwise we fall back to the id. The report DATA never depends on it.
-const lesson = loadLessons().find((l: Lesson) => l.id === lessonId) ?? null
-const lessonTitle = computed(() => lesson?.title ?? 'Lesson report')
+// Lesson title comes from D1 when available; otherwise we fall back to a
+// generic label. The report DATA never depends on the lesson definition.
+const lesson = ref<Lesson | null>(null)
+const lessonTitle = computed(() => lesson.value?.title ?? 'Lesson report')
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -38,7 +39,12 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    attempts.value = await fetchAttempts(lessonId)
+    const [a, l] = await Promise.all([
+      fetchAttempts(lessonId),
+      fetchLesson(lessonId).catch(() => null),
+    ])
+    attempts.value = a
+    lesson.value = l
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Could not load the report.'
   } finally {
