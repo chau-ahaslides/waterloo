@@ -384,17 +384,17 @@ async function convertLesson(env: Env, request: Request): Promise<Response> {
   }
 }
 
-// ── Courses (WAT-8) — STUB routes ────────────────────────────────────────────
+// ── Courses (WAT-8 / WAT-10) ────────────────────────────────────────────────
 //
-// Foundation stage: the Courses-feature data models exist in D1
-// (migrations/0003_courses_foundation.sql) but no business logic is wired yet.
-// These handlers are intentional placeholders so the route surface exists for
-// later stages (WAT-9..15) to fill in. They return 501 Not Implemented with a
-// TODO marker rather than touching the DB.
+// WAT-8 added stub routes (501) for the Course-container surface.
+// WAT-10 implements GET /api/courses/lessons — a list of NORMALIZED lessons
+// (i.e. lessons rows that have associated lesson_slides created by the WAT-9
+// AI convert pipeline). This endpoint powers the /courses home page.
 //
-// NOTE: this does NOT alter the existing /api/lessons routes (live editor /
-// converter / Take / Report from WAT-1/WAT-3/WAT-5). It only adds the new
-// /api/courses surface.
+// The Course-container /api/courses routes remain stubs until a later stage
+// wires them; they continue to return 501.
+//
+// NOTE: none of this touches the existing /api/lessons routes.
 
 /** A consistent 501 stub response for not-yet-implemented Courses endpoints. */
 function coursesStub(route: string): Response {
@@ -402,6 +402,59 @@ function coursesStub(route: string): Response {
     { error: 'Not Implemented', todo: `WAT-8 stub — ${route} not implemented yet` },
     501,
   )
+}
+
+// DB row shape for the normalized lesson list query.
+interface NormalizedLessonRow {
+  id: string
+  source_presentation_id: number | null
+  title: string
+  status: string
+  created_at: string
+  estimated_duration_minutes: number | null
+  language: string | null
+  slide_count: number
+}
+
+/**
+ * GET /api/courses/lessons — list normalized lessons (WAT-10).
+ *
+ * Returns lessons that were created by the WAT-9 AI convert pipeline, newest
+ * first by created_at. A lesson is "normalized" when it has at least one
+ * lesson_slides row (the AI convert pipeline always creates them). Legacy
+ * JSON-blob lessons that have zero lesson_slides rows are excluded.
+ *
+ * Response: { lessons: NormalizedLesson[] }
+ */
+async function listNormalizedLessons(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `SELECT
+       l.id,
+       l.source_presentation_id,
+       l.title,
+       l.status,
+       l.created_at,
+       l.estimated_duration_minutes,
+       l.language,
+       COUNT(ls.id) AS slide_count
+     FROM lessons l
+     INNER JOIN lesson_slides ls ON ls.lesson_id = l.id
+     GROUP BY l.id
+     ORDER BY l.created_at DESC`,
+  ).all<NormalizedLessonRow>()
+
+  const lessons = (results ?? []).map((r) => ({
+    id: r.id,
+    sourcePresentationId: r.source_presentation_id,
+    title: r.title,
+    status: r.status === 'published' ? 'published' : 'draft',
+    createdAt: r.created_at,
+    estimatedDurationMinutes: r.estimated_duration_minutes,
+    language: r.language,
+    slideCount: r.slide_count,
+  }))
+
+  return json({ lessons })
 }
 
 export default {
@@ -421,14 +474,21 @@ export default {
         return json({ error: 'Method not allowed' }, 405)
       }
 
-      // ── /api/courses (WAT-8 STUBS — no logic yet) ──────────────────────────
-      // /api/courses  (collection: list / create)
+      // ── /api/courses (WAT-10 live + WAT-8 stubs) ───────────────────────────
+      // /api/courses/lessons — list normalized lessons (WAT-10, LIVE)
+      // Match BEFORE /api/courses/:id so "lessons" isn't treated as a course id.
+      if (path === '/api/courses/lessons') {
+        if (request.method === 'GET') return listNormalizedLessons(env)
+        return json({ error: 'Method not allowed' }, 405)
+      }
+
+      // /api/courses  (collection: list / create — WAT-8 stub)
       if (path === '/api/courses') {
         if (request.method === 'GET') return coursesStub('GET /api/courses')
         if (request.method === 'POST') return coursesStub('POST /api/courses')
         return json({ error: 'Method not allowed' }, 405)
       }
-      // /api/courses/:id  (item: get / update / delete)
+      // /api/courses/:id  (item: get / update / delete — WAT-8 stub)
       const courseMatch = path.match(/^\/api\/courses\/([^/]+)$/)
       if (courseMatch) {
         if (['GET', 'PUT', 'DELETE'].includes(request.method)) {

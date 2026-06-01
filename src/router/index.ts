@@ -16,6 +16,8 @@ import TakeLesson from '@/views/TakeLesson.vue'
 import LessonReport from '@/views/LessonReport.vue'
 import LessonEditor from '@/views/LessonEditor.vue'
 import PresentationList from '@/views/PresentationList.vue'
+import CoursesHome from '@/views/CoursesHome.vue'
+import CourseLessonDetail from '@/views/CourseLessonDetail.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -48,6 +50,19 @@ const router = createRouter({
       path: '/lesson/:id/report',
       name: 'lesson-report',
       component: LessonReport,
+    },
+    {
+      // WAT-10 — Courses feature home: AI-generated (normalized) lessons list.
+      // Coexists with "/" (legacy WAT-1 flow) — see CoursesHome.vue FLAG comment.
+      path: '/courses',
+      name: 'courses-home',
+      component: CoursesHome,
+    },
+    {
+      // WAT-10 — Placeholder lesson detail (real experience: Stage 3 / WAT-11).
+      path: '/courses/lessons/:id',
+      name: 'courses-lesson-detail',
+      component: CourseLessonDetail,
     },
   ],
 })
