@@ -70,21 +70,24 @@ add E2E test
 
 | Command | What it runs |
 | --- | --- |
-| `npm test` | All unit + API tests (Vitest, single run) |
+| `npm test` | All unit + API + Worker tests (Vitest, single run) |
 | `npm run test:unit` | Same as above |
-| `npm run test:watch` | Unit + API tests in watch mode (for development) |
+| `npm run test:watch` | Unit + API + Worker tests in watch mode (for development) |
+| `npm run test:worker` | CF Worker integration tests only (`tests/worker/`) |
 | `npm run test:e2e` | Playwright E2E suite against the dev server |
 
 ### Where tests live
 
 | Kind | Location |
 | --- | --- |
-| Unit + API | `src/**/*.test.ts` (colocated with source files) |
+| Unit + API (jsdom) | `src/**/*.test.ts` (colocated with source files) |
+| CF Worker | `tests/worker/worker.test.ts` (Node environment, no build required) |
 | E2E | `tests/e2e/*.spec.ts` |
 
 ### Tooling
 
 - **Unit + API:** Vitest (`vitest`) + `@vue/test-utils` + jsdom
+- **CF Worker tests:** Vitest (Node environment) — imports `worker/index.ts` directly and calls `worker.fetch(req, envStub)` with a stubbed `ASSETS` binding; no `wrangler` or build step needed
 - **E2E:** Playwright (`@playwright/test`) — config at `playwright.config.ts`
 
 ### Seeded tests (one per major feature)
@@ -94,3 +97,13 @@ add E2E test
 | Lessons store + converter | `src/lessons/lessons.test.ts` |
 | Presentations API client | `src/api/presentations.test.ts` |
 | Slides API client + `isPickAnswerSlide` | `src/api/slides.test.ts` |
+| CF Worker routing | `tests/worker/worker.test.ts` |
+
+### CF Worker test — what it covers and how it works
+
+`tests/worker/worker.test.ts` runs in a Node environment (`// @vitest-environment node`) and imports the Worker default export from `worker/index.ts` directly. It calls `worker.fetch(request, envStub)` where `envStub.ASSETS.fetch` is a vi mock — so the Worker's routing logic runs in-process without spinning up workerd or wrangler.
+
+Assertions:
+- `GET /api/health` → 200 `{ok:true, service:"waterloo"}`, `ASSETS` NOT called
+- `GET /api/<unknown>` → 404 `{error:"Not found"}`
+- `GET /` and `GET /some/client-route` → delegates to `env.ASSETS.fetch` (SPA fallback path)

@@ -24,9 +24,10 @@ function setToken(token: string | null) {
 // fetchPresentationList
 // ---------------------------------------------------------------------------
 describe('fetchPresentationList', () => {
-  it('throws ApiError(401) when no token is provided', async () => {
+  it('throws ApiError(401) when token is explicitly passed as null', async () => {
     setToken(null)
-    await expect(fetchPresentationList()).rejects.toMatchObject({
+    // Pass null explicitly to bypass the DEV_TOKEN fallback in getToken()
+    await expect(fetchPresentationList({}, null as unknown as string)).rejects.toMatchObject({
       name: 'ApiError',
       status: 401,
     })

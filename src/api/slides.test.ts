@@ -40,10 +40,9 @@ describe('isPickAnswerSlide', () => {
 // fetchPresentationSlides — API client (fetch mocked)
 // ---------------------------------------------------------------------------
 describe('fetchPresentationSlides', () => {
-  it('throws ApiError(401) when no token provided', async () => {
-    // getToken() reads window.location.search — empty here
-    Object.defineProperty(window, 'location', { value: { search: '' }, writable: true })
-    await expect(fetchPresentationSlides(1)).rejects.toMatchObject({
+  it('throws ApiError(401) when token is explicitly passed as null', async () => {
+    // Pass null explicitly to bypass the DEV_TOKEN fallback in getToken()
+    await expect(fetchPresentationSlides(1, null as unknown as string)).rejects.toMatchObject({
       name: 'ApiError',
       status: 401,
     })
