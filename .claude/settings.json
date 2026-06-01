@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "aha-fleet@aha-claude-plugins": true
+  }
+}

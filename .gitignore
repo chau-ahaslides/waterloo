@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.env
+*.log
+.dev.vars
+.wrangler
+worker-configuration.d.ts

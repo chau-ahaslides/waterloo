@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "waterloo",
+  "compatibility_date": "2026-06-01",
+  "main": "worker/index.ts",
+  "assets": {
+    // Vite emits the built SPA here; `wrangler deploy` uploads it.
+    "directory": "./dist",
+    // Lets the Worker fall back to serving assets via env.ASSETS.fetch().
+    "binding": "ASSETS",
+    // Unmatched client-side routes (e.g. /dashboard) serve index.html with 200.
+    "not_found_handling": "single-page-application",
+    // Only /api/* is routed to the Worker; everything else is served as a
+    // static asset (with SPA fallback) without invoking the Worker at all.
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}
