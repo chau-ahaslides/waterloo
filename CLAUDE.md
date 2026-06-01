@@ -43,3 +43,54 @@ This app is part of **Project AhaSlides e-Learning** — a self-paced course pla
 Confluence source: https://ahaslides.atlassian.net/wiki/spaces/AT/pages/1881866288/Project+AhaSlides+e-Learning
 
 Key concepts every worker should know: **lessons** (self-paced content units), **converter** (presentation → course), **pick-answer/quiz slides** (engagement layer), **blended delivery** (live ↔ self-paced bridge). The product thesis is that AhaSlides' moat is offering both live and async delivery on one platform — no other tool does this well.
+
+## Testing
+
+### Policy
+
+Every major feature must have **three kinds of test coverage**, written at different points in the workflow:
+
+1. **Unit test** — pure logic (stores, mappers, helper functions). Added/updated automatically every time you change the relevant `src/` code.
+2. **API test** — tests the `src/api/*.ts` client functions with `fetch` mocked (assert correct URL + headers built, response parsed, `ApiError` thrown on 401). Added/updated automatically every time you change the relevant `src/api/` code.
+3. **E2E test** — one Playwright spec per major feature, added **ONLY after the user explicitly confirms the feature works as expected**. Do not write an E2E spec speculatively.
+
+### ⚠️ HARD RULE: Unit + API tests are MANDATORY on every code change
+
+Whenever you touch any file under `src/`, you MUST add or update the corresponding unit/API tests in the same commit. Skipping tests is not acceptable — this is a non-negotiable convention alongside the existing "always deploy after a feature" rule.
+
+### Typical workflow per feature
+
+```
+change code → add/adjust unit+API tests → build (vue-tsc + vite build) → deploy
+↓ (only after user confirms it works as expected)
+add E2E test
+```
+
+### Running the test suites
+
+| Command | What it runs |
+| --- | --- |
+| `npm test` | All unit + API tests (Vitest, single run) |
+| `npm run test:unit` | Same as above |
+| `npm run test:watch` | Unit + API tests in watch mode (for development) |
+| `npm run test:e2e` | Playwright E2E suite against the dev server |
+
+### Where tests live
+
+| Kind | Location |
+| --- | --- |
+| Unit + API | `src/**/*.test.ts` (colocated with source files) |
+| E2E | `tests/e2e/*.spec.ts` |
+
+### Tooling
+
+- **Unit + API:** Vitest (`vitest`) + `@vue/test-utils` + jsdom
+- **E2E:** Playwright (`@playwright/test`) — config at `playwright.config.ts`
+
+### Seeded tests (one per major feature)
+
+| Feature | Test file |
+| --- | --- |
+| Lessons store + converter | `src/lessons/lessons.test.ts` |
+| Presentations API client | `src/api/presentations.test.ts` |
+| Slides API client + `isPickAnswerSlide` | `src/api/slides.test.ts` |
