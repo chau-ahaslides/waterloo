@@ -13,9 +13,9 @@
     "cf:types": "wrangler types",
     "deploy": "npm run build && wrangler deploy",
     "test": "vitest run",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --project unit",
     "test:watch": "vitest",
-    "test:worker": "vitest run tests/worker/",
+    "test:worker": "vitest run --project workers",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -26,6 +26,7 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.10",
     "@playwright/test": "^1.60.0",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vitest/coverage-v8": "^4.1.8",

@@ -1,0 +1,19 @@
+{
+  // TypeScript config for the CF Worker tests so the `cloudflare:test` module
+  // and the workerd runtime types resolve. The main tsconfig only includes
+  // src/**, so these test files are type-checked against this config instead
+  // (e.g. in editors / `tsc -p tests/worker`). The build (`vue-tsc`) does not
+  // compile tests/, so this never affects the production bundle.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "types": [
+      "@cloudflare/vitest-pool-workers/types"
+    ]
+  },
+  "include": [
+    "./**/*.ts",
+    "../../worker-configuration.d.ts",
+    "../../worker/**/*.ts"
+  ]
+}
