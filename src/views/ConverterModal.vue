@@ -171,7 +171,7 @@ async function confirm() {
         Pick one or more presentations. Each becomes a lesson built from its
         <span class="font-semibold text-aha-space">pick-answer</span> slides.
       </p>
-      <a-space :size="8">
+      <div class="flex shrink-0 items-center gap-2">
         <a-select
           v-model:value="sortColumn"
           :options="sortOptions"
@@ -182,10 +182,10 @@ async function confirm() {
           <a-select-option value="desc">Newest first</a-select-option>
           <a-select-option value="asc">Oldest first</a-select-option>
         </a-select>
-        <a-button size="small" :loading="loading" @click="load">
+        <a-button size="small" :loading="loading" class="flex items-center" @click="load">
           <template #icon><ReloadOutlined /></template>
         </a-button>
-      </a-space>
+      </div>
     </div>
 
     <a-alert
@@ -260,7 +260,7 @@ async function confirm() {
             {{ p.name || 'Untitled' }}
           </h4>
           <div class="flex items-center gap-1 text-xs text-aha-indigo">
-            <FileTextOutlined /> {{ p.slideCount }} slides
+            <span class="inline-flex items-center gap-1"><FileTextOutlined /> {{ p.slideCount }} slides</span>
             <a-tag class="m-0 ml-auto font-mono">{{ p.accessCode }}</a-tag>
           </div>
         </div>
@@ -290,7 +290,7 @@ async function confirm() {
       <span class="text-sm text-aha-indigo">
         {{ selectedCount }} selected
       </span>
-      <a-space>
+      <div class="flex items-center gap-2">
         <a-button :disabled="converting" @click="close">Cancel</a-button>
         <a-button
           type="primary"
@@ -300,7 +300,7 @@ async function confirm() {
         >
           Convert to lesson{{ selectedCount === 1 ? '' : 's' }}
         </a-button>
-      </a-space>
+      </div>
     </div>
   </a-modal>
 </template>

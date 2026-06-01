@@ -91,9 +91,9 @@ function initials(name: string): string {
 <template>
   <main class="mx-auto max-w-6xl px-6 py-10">
     <header class="mb-6 flex flex-wrap items-center justify-between gap-4">
-      <div>
+      <div class="min-w-0 shrink-0">
         <h1 class="flex items-center gap-2 text-2xl font-extrabold text-aha-space">
-          <AppstoreOutlined class="text-aha-purple" />
+          <AppstoreOutlined class="shrink-0 text-aha-purple" />
           Presentations
         </h1>
         <p class="mt-1 text-sm text-aha-indigo">
@@ -101,17 +101,17 @@ function initials(name: string): string {
         </p>
       </div>
 
-      <a-space :size="12">
+      <div class="flex shrink-0 items-center gap-3">
         <a-select v-model:value="sortColumn" :options="sortOptions" style="width: 150px" />
         <a-select v-model:value="sortOrder" style="width: 130px">
           <a-select-option value="desc">Newest first</a-select-option>
           <a-select-option value="asc">Oldest first</a-select-option>
         </a-select>
-        <a-button :loading="loading" @click="load">
+        <a-button :loading="loading" class="flex items-center" @click="load">
           <template #icon><ReloadOutlined /></template>
           Refresh
         </a-button>
-      </a-space>
+      </div>
     </header>
 
     <!-- No token -->

@@ -133,3 +133,45 @@ Assertions:
 - `GET /api/health` → 200 JSON `{ok:true, service:"waterloo"}` (via `SELF.fetch` and via the direct export)
 - `GET /api/<unknown>` → 404 JSON `{error:"Not found"}`
 - non-`/api` paths → delegate to the **real `env.ASSETS` binding** (SPA / static-asset fallback)
+
+## UI alignment checklist
+
+Run through this checklist on every PR that touches a `.vue` file in `src/views/`.
+
+### Icon + text rows
+
+- [ ] Every row that places an icon next to text uses `flex items-center gap-<N>` on the parent (or `inline-flex items-center gap-<N>` for inline spans). Never rely on default `block` layout to align an icon with adjacent text.
+- [ ] Add `shrink-0` to standalone icon elements so they never compress and shift off-baseline when the sibling text is long.
+
+### Ant Design card covers
+
+- [ ] If a `<template #cover>` root element needs `flex` centering, use `!flex` (Tailwind's `!important` prefix). Ant Design's `.ant-card-cover > *` rule forces `display: block` on direct children, silently overriding `.flex`. Use `!flex items-center justify-center` on the cover root to override it.
+
+### Header / control rows
+
+- [ ] Page headers that have a title block on the left and controls on the right must use `flex flex-wrap items-center justify-between gap-<N>`. Both the title `<div>` and the controls `<div>` must use `shrink-0` so they never collapse or overflow each other.
+- [ ] Replace `<a-space>` with `<div class="flex items-center gap-<N>">` for control rows. `a-space` uses inline spacing that does not guarantee vertical alignment across different child types (buttons, selects, icons).
+- [ ] Button groups should all share the same `size` prop (default, small, large). Mixed sizes produce uneven baselines.
+
+### Cards / grids
+
+- [ ] Cards in a grid (`grid grid-cols-N gap-M`) must all have the same height. Use Ant Design's `:body-style="{ padding: '16px' }"` consistently. Avoid setting arbitrary heights on card bodies.
+- [ ] Thumbnail / cover image areas must have a fixed height class (`h-28`, `h-32`, etc.) so cards align across a row regardless of image content.
+- [ ] Info rows inside cards (e.g. slide count + access code) must use `flex items-center gap-<N>` with `inline-flex items-center gap-1` wrappers on each icon+text pair.
+
+### Single-column audience / full-screen views (LessonPlay)
+
+- [ ] Full-screen centered screens (`v-if="!lesson"`, completion, empty) must use `flex min-h-[100dvh] w-full flex-col items-center justify-center` — NOT `min-h-screen` (which can be shorter than the viewport on mobile with browser chrome).
+- [ ] Screens that are single-column by design should have a content max-width (`max-w-2xl`, `max-w-lg`, etc.) with `mx-auto` so content does not stretch uncomfortably on wide screens.
+- [ ] The progress bar in a full-width layout needs `block w-full` to prevent any margin collapse; use `!m-0` to override component default margins.
+
+### Spacing scale
+
+- [ ] Use Tailwind spacing tokens (`gap-2`, `gap-3`, `gap-4`, `px-6`, `py-4`, …) rather than arbitrary pixel values (`style="margin: 5px"`). Arbitrary values bypass the design-system scale and are invisible to future alignment audits.
+
+### Verification before replying
+
+- [ ] Open the app in a real browser (Chrome DevTools MCP or `npm run dev`) — never rely solely on code inspection.
+- [ ] Check at both desktop (≥ 1280 px) and mobile (375 px) widths.
+- [ ] Check at least: Home (empty + cards grid), PresentationList (header + grid), ConverterModal (list + footer), LessonPlay (active quiz + completion + not-found).
+- [ ] Screenshot each affected view and attach to the Slack reply via `POST $BASE/tasks/:id/slack/upload`.

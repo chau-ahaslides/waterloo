@@ -132,7 +132,7 @@ function optionClass(opt: LessonOption): string {
   <!-- ── Unknown lesson ─────────────────────────────────────────────────────── -->
   <main
     v-if="!lesson"
-    class="flex min-h-screen flex-col items-center justify-center gap-6 bg-aha-blush px-6 text-center"
+    class="flex min-h-[100dvh] w-full flex-col items-center justify-center gap-6 bg-aha-blush px-6 text-center"
   >
     <div class="flex h-20 w-20 items-center justify-center rounded-full bg-aha-lavender text-4xl text-aha-purple">
       <CloseCircleFilled />
@@ -148,7 +148,7 @@ function optionClass(opt: LessonOption): string {
   <!-- ── Empty lesson ───────────────────────────────────────────────────────── -->
   <main
     v-else-if="totalQuestions === 0"
-    class="flex min-h-screen flex-col items-center justify-center gap-6 bg-aha-blush px-6 text-center"
+    class="flex min-h-[100dvh] w-full flex-col items-center justify-center gap-6 bg-aha-blush px-6 text-center"
   >
     <div class="flex h-20 w-20 items-center justify-center rounded-full bg-aha-lavender text-4xl text-aha-purple">
       <TrophyOutlined />
@@ -166,7 +166,7 @@ function optionClass(opt: LessonOption): string {
   <!-- ── Completion screen ──────────────────────────────────────────────────── -->
   <main
     v-else-if="completed"
-    class="flex min-h-screen flex-col items-center justify-center gap-6 bg-aha-blush px-6 text-center"
+    class="flex min-h-[100dvh] w-full flex-col items-center justify-center gap-6 bg-aha-blush px-6 text-center"
   >
     <div class="flex h-24 w-24 items-center justify-center rounded-full bg-aha-teal/20 text-5xl text-aha-teal">
       <TrophyOutlined />
@@ -179,7 +179,7 @@ function optionClass(opt: LessonOption): string {
       <span class="font-extrabold text-aha-purple">{{ score }}/{{ totalQuestions }}</span>
       correct
     </p>
-    <div class="flex gap-3">
+    <div class="flex items-center gap-3">
       <a-button @click="restart">Try again</a-button>
       <a-button type="primary" @click="goHome">
         <template #icon><ArrowLeftOutlined /></template>
@@ -191,14 +191,14 @@ function optionClass(opt: LessonOption): string {
   <!-- ── Active quiz ────────────────────────────────────────────────────────── -->
   <main
     v-else
-    class="flex min-h-screen flex-col bg-aha-blush"
+    class="flex min-h-[100dvh] w-full flex-col bg-aha-blush"
   >
     <!-- Top bar -->
-    <header class="flex items-center gap-4 border-b border-aha-indigo/10 bg-white px-6 py-4 shadow-aha-sm">
-      <a-button type="text" size="small" @click="goHome">
+    <header class="flex w-full items-center gap-4 border-b border-aha-indigo/10 bg-white px-6 py-4 shadow-aha-sm">
+      <a-button type="text" size="small" class="shrink-0" @click="goHome">
         <template #icon><ArrowLeftOutlined /></template>
       </a-button>
-      <div class="flex-1 min-w-0">
+      <div class="min-w-0 flex-1">
         <p class="truncate text-sm font-semibold text-aha-space" :title="lesson.title">
           {{ lesson.title }}
         </p>
@@ -207,7 +207,7 @@ function optionClass(opt: LessonOption): string {
         </p>
       </div>
       <!-- Score badge -->
-      <span class="rounded-full bg-aha-purple px-3 py-1 text-xs font-bold text-white">
+      <span class="shrink-0 rounded-full bg-aha-purple px-3 py-1 text-xs font-bold text-white">
         {{ score }} / {{ questionNumber - 1 }} correct
       </span>
     </header>
@@ -218,7 +218,7 @@ function optionClass(opt: LessonOption): string {
       :show-info="false"
       stroke-color="#6A1EBB"
       trail-color="#D3B4FF"
-      class="m-0 rounded-none"
+      class="block w-full !m-0 rounded-none"
       :stroke-width="6"
     />
 

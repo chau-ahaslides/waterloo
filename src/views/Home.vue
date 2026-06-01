@@ -60,11 +60,11 @@ function lessonColor(l: Lesson): string {
 <template>
   <main class="mx-auto max-w-6xl px-6 py-10">
     <header class="mb-8 flex flex-wrap items-center justify-between gap-4">
-      <div>
+      <div class="min-w-0 shrink-0">
         <h1
           class="flex items-center gap-2 text-2xl font-extrabold text-aha-space"
         >
-          <BookOutlined class="text-aha-purple" />
+          <BookOutlined class="shrink-0 text-aha-purple" />
           My Lessons
         </h1>
         <p class="mt-1 text-sm text-aha-indigo">
@@ -72,18 +72,18 @@ function lessonColor(l: Lesson): string {
         </p>
       </div>
 
-      <a-space :size="12">
+      <div class="flex shrink-0 items-center gap-3">
         <RouterLink :to="{ name: 'presentations', query: $route.query }">
-          <a-button>
+          <a-button class="flex items-center">
             <template #icon><AppstoreOutlined /></template>
             Presentations
           </a-button>
         </RouterLink>
-        <a-button type="primary" :disabled="!hasToken" @click="converterOpen = true">
+        <a-button type="primary" :disabled="!hasToken" class="flex items-center" @click="converterOpen = true">
           <template #icon><PlusOutlined /></template>
           Create new lesson
         </a-button>
-      </a-space>
+      </div>
     </header>
 
     <!-- No token -->
@@ -132,7 +132,7 @@ function lessonColor(l: Lesson): string {
       >
         <template #cover>
           <div
-            class="flex h-28 w-full items-center justify-center text-3xl font-extrabold text-white"
+            class="!flex h-28 w-full items-center justify-center text-3xl font-extrabold text-white"
             :style="{ backgroundColor: lessonColor(l) }"
           >
             <ReadOutlined />
