@@ -35,3 +35,11 @@ Whenever a feature or fix is complete and verified, run `npm run deploy` to push
 - Calls `GET /api/presentation/list/infinity-scroll/v2` on `presenter.dev.ahaslide.com` directly from the browser (the dev API sends `access-control-allow-origin: *`, so no proxy is needed), sending `Authorization: Bearer <token>`.
 - API client lives in `src/api/presentations.ts`. Base URL overridable via `VITE_API_BASE`.
 - Server-side pagination (50 items/page), sort-column + order controls, loading / empty / error / no-token states.
+
+## Project context
+
+This app is part of **Project AhaSlides e-Learning** — a self-paced course platform built on top of AhaSlides' existing interactive presentation engine. The strategic thesis is captured in [`docs/PROJECT-THESIS.md`](./docs/PROJECT-THESIS.md) (last fetched from Confluence 2026-06-01; re-fetch when stale).
+
+Confluence source: https://ahaslides.atlassian.net/wiki/spaces/AT/pages/1881866288/Project+AhaSlides+e-Learning
+
+Key concepts every worker should know: **lessons** (self-paced content units), **converter** (presentation → course), **pick-answer/quiz slides** (engagement layer), **blended delivery** (live ↔ self-paced bridge). The product thesis is that AhaSlides' moat is offering both live and async delivery on one platform — no other tool does this well.
