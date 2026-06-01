@@ -323,6 +323,26 @@ async function publishLesson(env: Env, id: string): Promise<Response> {
   return getLesson(env, id)
 }
 
+// ── Courses (WAT-8) — STUB routes ────────────────────────────────────────────
+//
+// Foundation stage: the Courses-feature data models exist in D1
+// (migrations/0003_courses_foundation.sql) but no business logic is wired yet.
+// These handlers are intentional placeholders so the route surface exists for
+// later stages (WAT-9..15) to fill in. They return 501 Not Implemented with a
+// TODO marker rather than touching the DB.
+//
+// NOTE: this does NOT alter the existing /api/lessons routes (live editor /
+// converter / Take / Report from WAT-1/WAT-3/WAT-5). It only adds the new
+// /api/courses surface.
+
+/** A consistent 501 stub response for not-yet-implemented Courses endpoints. */
+function coursesStub(route: string): Response {
+  return json(
+    { error: 'Not Implemented', todo: `WAT-8 stub — ${route} not implemented yet` },
+    501,
+  )
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url)
@@ -331,6 +351,30 @@ export default {
     if (path.startsWith('/api/')) {
       if (path === '/api/health') {
         return json({ ok: true, service: 'waterloo' })
+      }
+
+      // ── /api/courses (WAT-8 STUBS — no logic yet) ──────────────────────────
+      // /api/courses  (collection: list / create)
+      if (path === '/api/courses') {
+        if (request.method === 'GET') return coursesStub('GET /api/courses')
+        if (request.method === 'POST') return coursesStub('POST /api/courses')
+        return json({ error: 'Method not allowed' }, 405)
+      }
+      // /api/courses/:id  (item: get / update / delete)
+      const courseMatch = path.match(/^\/api\/courses\/([^/]+)$/)
+      if (courseMatch) {
+        if (['GET', 'PUT', 'DELETE'].includes(request.method)) {
+          return coursesStub(`${request.method} /api/courses/:id`)
+        }
+        return json({ error: 'Method not allowed' }, 405)
+      }
+      // /api/courses/:id/lessons  (course ↔ lesson membership)
+      const courseLessonsMatch = path.match(/^\/api\/courses\/([^/]+)\/lessons$/)
+      if (courseLessonsMatch) {
+        if (['GET', 'POST'].includes(request.method)) {
+          return coursesStub(`${request.method} /api/courses/:id/lessons`)
+        }
+        return json({ error: 'Method not allowed' }, 405)
       }
 
       // /api/lessons/:lessonId/attempts  (match BEFORE the bare-id route)
